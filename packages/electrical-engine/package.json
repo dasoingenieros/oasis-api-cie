@@ -1,0 +1,32 @@
+{
+  "name": "@daso/electrical-engine",
+  "version": "0.1.0",
+  "description": "Motor de cálculos REBT para instalaciones eléctricas de baja tensión",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc",
+    "test": "jest --coverage",
+    "test:watch": "jest --watch",
+    "lint": "eslint src --ext .ts"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.0",
+    "@types/jest": "^29.0.0",
+    "jest": "^29.0.0",
+    "ts-jest": "^29.0.0"
+  },
+  "jest": {
+    "preset": "ts-jest",
+    "testEnvironment": "node",
+    "coveragePathIgnorePatterns": ["src/index.ts"],
+    "coverageThreshold": {
+      "global": {
+        "lines": 90,
+        "functions": 90,
+        "branches": 85
+      }
+    }
+  }
+}

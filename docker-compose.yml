@@ -1,0 +1,38 @@
+# docker-compose.yml — Para plataforma OASIS (LXC 104)
+# Solo el API + su propia PostgreSQL. Auth/web ya existen en LXC 104.
+
+services:
+  cie-api:
+    build: .
+    container_name: oasis-api-cie
+    restart: unless-stopped
+    ports:
+      - "3001:3001"
+    env_file: .env
+    networks:
+      - oasis-network
+    depends_on:
+      - cie-postgres
+
+  cie-postgres:
+    image: postgres:16-alpine
+    container_name: cie-postgres
+    restart: unless-stopped
+    ports:
+      - "5433:5432"
+    environment:
+      POSTGRES_DB: oasis_cie
+      POSTGRES_USER: cie
+      POSTGRES_PASSWORD: ${CIE_DB_PASSWORD}
+    volumes:
+      - cie-pgdata:/var/lib/postgresql/data
+    networks:
+      - oasis-network
+
+volumes:
+  cie-pgdata:
+
+networks:
+  oasis-network:
+    external: true
+    name: honest-greens_default

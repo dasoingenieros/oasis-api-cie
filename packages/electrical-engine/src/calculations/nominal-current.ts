@@ -1,0 +1,197 @@
+/**
+ * CÁLCULO DE INTENSIDAD NOMINAL
+ *
+ * Normativa: ITC-BT-19, ITC-BT-47
+ *
+ * Fórmulas:
+ *   Monofásica: In = P / (V × cosφ)
+ *   Trifásica:  In = P / (√3 × V × cosφ)
+ *
+ * Con factores de simultaneidad y utilización:
+ *   P_efectiva = P_instalada × Ks × Fu
+ *   In = P_efectiva / (V_fase × cosφ)
+ */
+
+import type { PhaseSystem, JustificationStep } from "../types";
+import { EngineError } from "../types";
+
+// ─── Constantes físicas ───────────────────────────────────────────────────
+
+const SQRT3 = Math.sqrt(3); // 1.7320508...
+
+// Tensiones nominales por defecto (España)
+const DEFAULT_VOLTAGE: Record<PhaseSystem, number> = {
+  single: 230, // Fase-Neutro
+  three: 400,  // Fase-Fase
+};
+
+// ─── Interfaces ───────────────────────────────────────────────────────────
+
+export interface NominalCurrentInput {
+  phaseSystem: PhaseSystem;
+  loadPowerW: number;           // Potencia instalada total (W)
+  powerFactor: number;          // cosφ — típico: 1.0 resistivo, 0.85 motores
+  simultaneityFactor?: number;  // Ks — default 1.0 (peor caso)
+  loadFactor?: number;          // Fu — default 1.0 (peor caso)
+  voltageV?: number;            // Tensión (V) — default 230/400 según fase
+  circuitId?: string;
+}
+
+export interface NominalCurrentResult {
+  nominalCurrentA: number;
+  effectivePowerW: number;
+  voltageV: number;
+  phaseSystem: PhaseSystem;
+  powerFactor: number;
+  simultaneityFactor: number;
+  loadFactor: number;
+  steps: JustificationStep[];
+}
+
+// ─── Función principal ────────────────────────────────────────────────────
+
+/**
+ * Calcula la intensidad nominal de un circuito según REBT.
+ *
+ * @param input Parámetros del circuito
+ * @returns Intensidad nominal y trazabilidad de cálculo
+ * @throws EngineError si los parámetros son inválidos
+ */
+export function calculateNominalCurrent(
+  input: NominalCurrentInput
+): NominalCurrentResult {
+
+  // ── Validación de entrada ───────────────────────────────────────────────
+  if (input.loadPowerW <= 0) {
+    throw new EngineError(
+      `Potencia inválida: ${input.loadPowerW}W. Debe ser > 0.`,
+      "INVALID_POWER",
+      input.circuitId
+    );
+  }
+
+  if (input.powerFactor <= 0 || input.powerFactor > 1) {
+    throw new EngineError(
+      `Factor de potencia inválido: ${input.powerFactor}. Rango válido: (0, 1].`,
+      "INVALID_POWER_FACTOR",
+      input.circuitId
+    );
+  }
+
+  const Ks = input.simultaneityFactor ?? 1.0;
+  const Fu = input.loadFactor ?? 1.0;
+
+  if (Ks <= 0 || Ks > 1) {
+    throw new EngineError(
+      `Factor de simultaneidad inválido: ${Ks}. Rango válido: (0, 1].`,
+      "INVALID_KS",
+      input.circuitId
+    );
+  }
+
+  if (Fu <= 0 || Fu > 1) {
+    throw new EngineError(
+      `Factor de utilización inválido: ${Fu}. Rango válido: (0, 1].`,
+      "INVALID_FU",
+      input.circuitId
+    );
+  }
+
+  // ── Variables ──────────────────────────────────────────────────────────
+
+  const V = input.voltageV ?? DEFAULT_VOLTAGE[input.phaseSystem];
+  const cosφ = input.powerFactor;
+  const P_instalada = input.loadPowerW;
+  const P_efectiva = P_instalada * Ks * Fu;
+  const steps: JustificationStep[] = [];
+
+  // ── Paso 1: Potencia efectiva ──────────────────────────────────────────
+  steps.push({
+    order: 1,
+    description: "Potencia efectiva de diseño",
+    formula: "P_ef = P_instalada × Ks × Fu",
+    inputValues: {
+      P_instalada: P_instalada,
+      Ks: Ks,
+      Fu: Fu,
+    },
+    result: round2(P_efectiva),
+    unit: "W",
+    normRef: "ITC-BT-19 §2",
+  });
+
+  // ── Paso 2: Intensidad nominal ─────────────────────────────────────────
+
+  let In: number;
+
+  if (input.phaseSystem === "single") {
+
+    // Monofásica: In = P / (V × cosφ)
+    In = P_efectiva / (V * cosφ);
+
+    steps.push({
+      order: 2,
+      description: "Intensidad nominal monofásica",
+      formula: "In = P_ef / (V × cosφ)",
+      inputValues: {
+        P_ef: round2(P_efectiva),
+        V: V,
+        cosφ: cosφ,
+      },
+      result: round2(In),
+      unit: "A",
+      normRef: "ITC-BT-19 §2.1 / Fórmula monofásica",
+    });
+
+  } else {
+
+    // Trifásica: In = P / (√3 × V × cosφ)
+    In = P_efectiva / (SQRT3 * V * cosφ);
+
+    steps.push({
+      order: 2,
+      description: "Intensidad nominal trifásica",
+      formula: "In = P_ef / (√3 × V × cosφ)",
+      inputValues: {
+        P_ef: round2(P_efectiva),
+        "√3": round4(SQRT3),
+        V: V,
+        cosφ: cosφ,
+      },
+      result: round2(In),
+      unit: "A",
+      normRef: "ITC-BT-19 §2.1 / Fórmula trifásica",
+    });
+
+  }
+
+  // ── Validación de resultado ────────────────────────────────────────────
+  if (!isFinite(In) || In <= 0) {
+    throw new EngineError(
+      `El cálculo produjo una intensidad nominal inválida: ${In}A. Revisar parámetros de entrada.`,
+      "INVALID_RESULT",
+      input.circuitId
+    );
+  }
+
+  return {
+    nominalCurrentA: round2(In),
+    effectivePowerW: round2(P_efectiva),
+    voltageV: V,
+    phaseSystem: input.phaseSystem,
+    powerFactor: cosφ,
+    simultaneityFactor: Ks,
+    loadFactor: Fu,
+    steps,
+  };
+}
+
+// ─── Utilidades ──────────────────────────────────────────────────────────
+
+function round2(n: number): number {
+  return Math.round(n * 100) / 100;
+}
+
+function round4(n: number): number {
+  return Math.round(n * 10000) / 10000;
+}

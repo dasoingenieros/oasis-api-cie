@@ -1,0 +1,594 @@
+// prisma/schema.prisma
+// oasis-api-cie — DASO Ingenieros
+// Schema limpio v2.0 — Convenciones OASIS, multi-tenant, cuid()
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ── Tenant ──────────────────────────────────────────────────────────────────
+
+model Tenant {
+  id        String   @id @default(cuid())
+  name      String
+  slug      String   @unique
+  settings  Json?    // TenantSettings (modules, maxUsers, etc.)
+
+  // Datos empresa instaladora (compartidos por todos los users del tenant)
+  empresaNif         String?
+  empresaNombre      String?
+  empresaCategoria   String?   // Básica | Especialista
+  empresaRegNum      String?   // Nº Registro Integrado Industrial
+  empresaTipoVia     String?
+  empresaNombreVia   String?
+  empresaNumero      String?
+  empresaLocalidad   String?
+  empresaProvincia   String?
+  empresaCp          String?
+  empresaTelefono    String?
+  empresaMovil       String?
+  empresaEmail       String?
+  distribuidoraHab   String?   // Distribuidora habitual
+
+  // Stripe
+  stripeCustomerId     String? @unique
+  stripeSubscriptionId String?
+  subscriptionStatus   String? // active, past_due, canceled, trialing
+
+  // Límites
+  certCount     Int      @default(0)
+  certResetDate DateTime @default(now())
+  maxCertsMonth Int      @default(-1) // -1 = ilimitado
+  maxCertsTotal Int      @default(-1) // -1 = ilimitado
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  users         User[]
+  installations Installation[]
+  auditLogs     AuditLog[]
+}
+
+// ── User ────────────────────────────────────────────────────────────────────
+
+model User {
+  id        String   @id @default(cuid())
+  tenantId  String
+  email     String
+  name      String
+  role      UserRole @default(OPERATOR)
+  isActive  Boolean  @default(true)
+
+  // Auth embedded fields (solo si AUTH_MODE=embedded)
+  passwordHash     String?
+  refreshToken     String?
+
+  // RGPD
+  acceptedPrivacy   Boolean   @default(false)
+  acceptedPrivacyAt DateTime?
+  emailVerified     Boolean   @default(false)
+  emailVerifyToken  String?
+
+  // Datos firmante
+  signerRegNum     String?
+  signerCategory   String?
+  signerInsurance  Boolean @default(false)
+  signerVerified   Boolean @default(false)
+
+  // Datos empresa/instalador por usuario
+  empresaNif         String?
+  empresaNombre      String?
+  empresaCategoria   String?
+  empresaRegNum      String?
+  instaladorNombre   String?
+  instaladorNif      String?
+  instaladorCertNum  String?
+  empresaTipoVia     String?
+  empresaNombreVia   String?
+  empresaNumero      String?
+  empresaLocalidad   String?
+  empresaProvincia   String?
+  empresaCp          String?
+  empresaTelefono    String?
+  empresaMovil       String?
+  empresaEmail       String?
+  distribuidoraHab   String?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  tenant        Tenant         @relation(fields: [tenantId], references: [id])
+  installations Installation[]
+  documents     Document[]
+  auditLogs     AuditLog[]
+
+  @@unique([tenantId, email])
+  @@index([tenantId])
+}
+
+enum UserRole {
+  VIEWER
+  OPERATOR
+  SIGNER
+  ADMIN
+  SUPERADMIN
+}
+
+// ── Installation (entidad principal CIE) ────────────────────────────────────
+
+model Installation {
+  id       String             @id @default(cuid())
+  tenantId String
+  userId   String
+  status   InstallationStatus @default(DRAFT)
+
+  // ═══ DATOS DEL TITULAR ═══
+  titularNif          String?
+  titularNombre       String?
+  titularApellido1    String?
+  titularApellido2    String?
+  titularTipoVia      String?
+  titularNombreVia    String?
+  titularNumero       String?
+  titularBloque       String?
+  titularEscalera     String?
+  titularPiso         String?
+  titularPuerta       String?
+  titularLocalidad    String?
+  titularProvincia    String?
+  titularCp           String?
+  titularEmail        String?
+  titularTelefono     String?
+  titularMovil        String?
+  representanteNombre String?
+  representanteNif    String?
+
+  // ═══ EMPLAZAMIENTO DE LA INSTALACIÓN ═══
+  emplazTipoVia    String?
+  emplazNombreVia  String?
+  emplazNumero     String?
+  emplazBloque     String?
+  emplazEscalera   String?
+  emplazPiso       String?
+  emplazPuerta     String?
+  emplazLocalidad  String?
+  emplazProvincia  String?
+  emplazCp         String?
+  superficieM2     Float?
+  cups             String?
+
+  // ═══ DATOS TÉCNICOS ═══
+  tipoDocumentacion    String?          // "MTD" | "PROYECTO"
+  supplyType           SupplyType?
+  supplyVoltage        Int?             // 230 | 400
+  tipoActuacion        String?          // NUEVA, MODIFICACION, AMPLIACION
+  tipoMemoria          String?          // N, A, CN, CT
+  usoInstalacion       String?
+  aforo                String?
+  tipoInstalacionCie   String?          // Tipo detallado CIE (79 tipos)
+  gradoElectrificacion String?          // "BASICO" | "ELEVADO"
+  temporalidad         Int?
+  numRegistroExistente String?
+
+  // ═══ POTENCIAS ═══
+  potMaxAdmisible Float?   // kW
+  potAmpliacion   Float?   // kW
+  potOriginal     Float?   // kW
+
+  // ═══ ACOMETIDA ═══
+  puntoConexion    String?
+  tipoAcometida    String?
+  seccionAcometida Float?
+  materialAcometida String?
+
+  // ═══ CGP ═══
+  tipoCgp       String?
+  inBaseCgp     Float?
+  inCartuchoCgp Float?
+
+  // ═══ LGA ═══
+  seccionLga     Float?
+  materialLga    String?
+  longitudLga    Float?
+  aislamientoLga String?
+
+  // ═══ DERIVACIÓN INDIVIDUAL ═══
+  seccionDi         Float?
+  cdtDi             Float?
+  materialDi        String?
+  longitudDi        Float?
+  numDerivaciones   Int?
+  aislamientoDi     String?
+  tipoInstalacionDi String?
+
+  // ═══ MÓDULO DE MEDIDA ═══
+  tipoModuloMedida String?
+  situacionModulo  String?
+
+  // ═══ CONTADOR ═══
+  contadorUbicacion String?
+
+  // ═══ PUESTA A TIERRA ═══
+  tipoElectrodos          String?
+  seccionLineaEnlace      Float?
+  seccionCondProteccion   Float?
+  resistenciaTierra       Float?
+  resistenciaAislamiento  Float?
+  esquemaDistribucion     String?
+  protSobretensiones      Boolean? @default(false)
+
+  // ═══ PROTECCIONES ═══
+  igaNominal              Float?
+  igaPoderCorte           Float?
+  diferencialNominal      Float?
+  diferencialSensibilidad Int?
+
+  // ═══ VERIFICACIONES ═══
+  otrasVerificaciones String?
+
+  // ═══ EMPRESA INSTALADORA (snapshot por instalación) ═══
+  empresaNif         String?
+  empresaNombre      String?
+  empresaCategoria   String?
+  empresaRegNum      String?
+  instaladorNombre   String?
+  instaladorNif      String?
+  instaladorCertNum  String?
+  empresaTipoVia     String?
+  empresaNombreVia   String?
+  empresaNumero      String?
+  empresaLocalidad   String?
+  empresaProvincia   String?
+  empresaCp          String?
+  empresaTelefono    String?
+  empresaMovil       String?
+  empresaEmail       String?
+
+  // ═══ DISTRIBUIDORA ═══
+  distribuidora String?
+
+  // ═══ PRESUPUESTO ═══
+  presupuestoMateriales Float?
+  presupuestoManoObra   Float?
+  presupuestoTotal      Float?
+
+  // ═══ INFO ADICIONAL ═══
+  infoAdicional String?
+
+  // ═══ CIE ESPECÍFICOS ═══
+  identificadorCie   String?
+  aplicaReeae        Boolean? @default(false)
+  potLuminariasReeae Float?
+  aplicaItcBt51      Boolean? @default(false)
+
+  // ═══ MTD AUTOR Y MEMORIA ═══
+  tipoAutor          String?
+  memoriaDescriptiva String?
+
+  // ═══ FIRMA ═══
+  firmaLugar String?
+  firmaFecha DateTime?
+
+  // ═══ ESTADO Y TRAMITACIÓN ═══
+  signerId     String?
+  templateUsed String?
+  reviewNotes  String?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  tenant         Tenant           @relation(fields: [tenantId], references: [id])
+  user           User             @relation(fields: [userId], references: [id])
+  circuits       Circuit[]
+  calculations   CalculationResult[]
+  documents      Document[]
+  photos         Photo[]
+  signingRequests SigningRequest[]
+  panel          ElectricalPanel?
+  unifilarLayout UnifilarLayout?
+
+  @@index([tenantId])
+  @@index([userId])
+  @@index([tenantId, status])
+}
+
+enum SupplyType {
+  VIVIENDA_BASICA
+  VIVIENDA_ELEVADA
+  IRVE
+  LOCAL_COMERCIAL
+}
+
+enum InstallationStatus {
+  DRAFT
+  CALCULATED
+  PENDING_REVIEW
+  RETURNED
+  APPROVED
+  DOCUMENTED
+  SIGNED
+  SUBMITTED
+  COMPLETED
+}
+
+// ── Cuadro Eléctrico ────────────────────────────────────────────────────────
+
+model ElectricalPanel {
+  id             String       @id @default(cuid())
+  installationId String       @unique
+  installation   Installation @relation(fields: [installationId], references: [id], onDelete: Cascade)
+
+  igaCalibreA    Int    @default(25)
+  igaCurve       String @default("C")
+  igaPowerCutKa  Int    @default(6)
+  igaPoles       Int    @default(2)
+  voltage        Int    @default(230)
+  maxPowerW      Float?
+
+  differentials Differential[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// ── Diferenciales ───────────────────────────────────────────────────────────
+
+model Differential {
+  id            String          @id @default(cuid())
+  panelId       String
+  panel         ElectricalPanel @relation(fields: [panelId], references: [id], onDelete: Cascade)
+
+  name          String @default("Diferencial 1")
+  order         Int    @default(1)
+  calibreA      Int    @default(40)
+  sensitivityMa Int    @default(30)
+  type          String @default("AC")
+  poles         Int    @default(2)
+
+  isProtected    Boolean?
+  protectionNote String?
+
+  circuits Circuit[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([panelId])
+}
+
+// ── Circuitos ───────────────────────────────────────────────────────────────
+
+model Circuit {
+  id             String       @id @default(cuid())
+  installationId String
+  installation   Installation @relation(fields: [installationId], references: [id], onDelete: Cascade)
+
+  differentialId String?
+  differential   Differential? @relation(fields: [differentialId], references: [id], onDelete: SetNull)
+
+  name            String
+  code            String?
+  order           Int
+
+  power           Float
+  voltage         Int
+  phases          Int
+  length          Float
+  cableType       CableType      @default(CU)
+  insulationType  InsulationType  @default(PVC)
+  installMethod   InstallMethod
+  cosPhi          Float          @default(1.0)
+  tempCorrFactor  Float          @default(1.0)
+  groupCorrFactor Float          @default(1.0)
+
+  breakerCurve    String  @default("C")
+  breakerCutKa    Int     @default(6)
+  installedPowerW Float?
+
+  maniobraType     ManiobraType?
+  maniobraCalibreA Int?
+  maniobraExtra    Json?
+
+  // Resultados del motor
+  calculatedSection Float?
+  assignedBreaker   String?
+  assignedRCD       String?
+  voltageDrop       Float?
+  voltageDropAcc    Float?
+  shortCircuit      Float?
+  compliance        Boolean?
+  justification     Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([installationId])
+  @@index([differentialId])
+}
+
+enum CableType {
+  CU
+  AL
+}
+
+enum InsulationType {
+  PVC
+  XLPE
+  EPR
+}
+
+enum InstallMethod {
+  A1
+  A2
+  B1
+  B2
+  C
+  D
+  E
+  F
+}
+
+enum ManiobraType {
+  CONTACTOR
+  GUARDAMOTOR
+  RELOJ
+  CONTACTOR_RELOJ
+  GUARDAMOTOR_PROTECCION
+}
+
+// ── Resultados de Cálculo ───────────────────────────────────────────────────
+
+model CalculationResult {
+  id             String       @id @default(cuid())
+  installationId String
+  installation   Installation @relation(fields: [installationId], references: [id])
+  version        Int
+  engineVersion  String
+  normVersion    String
+  inputSnapshot  Json
+  resultSnapshot Json
+  allCompliant   Boolean
+
+  calculatedAt DateTime @default(now())
+
+  @@index([installationId])
+}
+
+// ── Documentos ──────────────────────────────────────────────────────────────
+
+model Document {
+  id             String       @id @default(cuid())
+  installationId String
+  installation   Installation @relation(fields: [installationId], references: [id])
+  userId         String?
+  user           User?        @relation(fields: [userId], references: [id])
+  type           DocumentType
+  filename       String
+  storageKey     String?
+  mimeType       String       @default("application/pdf")
+  sizeBytes      Int?
+  content        Bytes?
+  version        Int          @default(1)
+  isDraft        Boolean      @default(false)
+
+  generatedAt DateTime @default(now())
+
+  @@index([installationId])
+}
+
+enum DocumentType {
+  CERTIFICADO
+  MEMORIA_TECNICA
+  SOLICITUD
+  UNIFILAR
+}
+
+// ── Fotos ───────────────────────────────────────────────────────────────────
+
+model Photo {
+  id             String        @id @default(cuid())
+  installationId String
+  installation   Installation  @relation(fields: [installationId], references: [id])
+  uploadedBy     String
+  filename       String
+  storageKey     String
+  mimeType       String
+  sizeBytes      Int
+  category       PhotoCategory?
+  description    String?
+  gpsLat         Float?
+  gpsLng         Float?
+
+  uploadedAt DateTime @default(now())
+
+  @@index([installationId])
+}
+
+enum PhotoCategory {
+  CUADRO
+  ACOMETIDA
+  CANALIZACION
+  TOMAS
+  TIERRA
+  GENERAL
+}
+
+// ── Signing Requests ────────────────────────────────────────────────────────
+
+model SigningRequest {
+  id             String              @id @default(cuid())
+  installationId String
+  installation   Installation        @relation(fields: [installationId], references: [id])
+  requestedBy    String
+  assignedTo     String?
+  status         SigningRequestStatus @default(PENDING)
+  fee            Decimal?            @db.Decimal(10, 2)
+  platformFee    Decimal?            @db.Decimal(10, 2)
+  notes          String?
+
+  createdAt   DateTime  @default(now())
+  completedAt DateTime?
+
+  @@index([installationId])
+}
+
+enum SigningRequestStatus {
+  PENDING
+  ASSIGNED
+  IN_REVIEW
+  COMPLETED
+  REJECTED
+}
+
+// ── Unifilar Layout ─────────────────────────────────────────────────────────
+
+model UnifilarLayout {
+  id             String       @id @default(cuid())
+  installationId String       @unique
+  installation   Installation @relation(fields: [installationId], references: [id])
+  layoutJson     Json
+  version        Int          @default(1)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([installationId])
+}
+
+// ── Audit Log ───────────────────────────────────────────────────────────────
+
+model AuditLog {
+  id       String      @id @default(cuid())
+  tenantId String
+  userId   String
+  action   AuditAction
+  entity   String
+  entityId String
+  details  Json?
+  ip       String?
+
+  createdAt DateTime @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+  user   User   @relation(fields: [userId], references: [id])
+
+  @@index([tenantId, createdAt])
+  @@index([entity, entityId])
+}
+
+enum AuditAction {
+  CREATE
+  UPDATE
+  DELETE
+  LOGIN
+  LOGOUT
+  EXPORT
+  GENERATE
+}
