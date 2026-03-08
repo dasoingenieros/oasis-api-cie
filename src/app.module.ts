@@ -55,7 +55,7 @@ import type { AppConfig } from './config/configuration';
   ],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },
-    { provide: APP_FILTER, useClass: AllExceptionsFilter },
+    { provide: APP_FILTER, useValue: new AllExceptionsFilter() },
     { provide: APP_INTERCEPTOR, useClass: TenantInterceptor },
   ],
 })
