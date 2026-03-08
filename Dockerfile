@@ -6,8 +6,9 @@ FROM node:20-slim AS builder
 WORKDIR /app
 
 COPY package*.json ./
+COPY packages ./packages
 COPY .npmrc* ./
-RUN npm ci
+RUN npm ci --legacy-peer-deps
 
 COPY prisma ./prisma
 RUN npx prisma generate
