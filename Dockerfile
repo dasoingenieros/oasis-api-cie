@@ -52,4 +52,4 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=15s \
     CMD curl -sf http://localhost:3001/api/v1/health || exit 1
 
 EXPOSE 3001
-CMD ["node", "dist/main"]
+CMD ["node", "dist/src/main"]

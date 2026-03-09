@@ -15,6 +15,13 @@ export class SubscriptionsController {
     return this.subscriptionsService.getCurrentPlan(req.user.tenantId);
   }
 
+  /** Usage stats: certsGenerated, maxCerts, plan */
+  @Get('usage')
+  @UseGuards(JwtAuthGuard)
+  getUsage(@Request() req: any) {
+    return this.subscriptionsService.getUsage(req.user.tenantId);
+  }
+
   /** Crear sesión de Stripe Checkout para upgrade */
   @Post('checkout')
   @UseGuards(JwtAuthGuard)

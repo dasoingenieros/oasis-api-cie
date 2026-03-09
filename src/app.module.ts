@@ -17,6 +17,9 @@ import { PanelsModule } from './panels/panels.module';
 import { UnifilarModule } from './unifilar/unifilar.module';
 import { TenantsModule } from './tenants/tenants.module';
 import { SubscriptionsModule } from './subscriptions/subscriptions.module';
+import { EmailModule } from './email/email.module';
+import { AuthExtensionsModule } from './auth-extensions/auth-extensions.module';
+import { OnboardingModule } from './onboarding/onboarding.module';
 import configuration from './config/configuration';
 import type { AppConfig } from './config/configuration';
 
@@ -32,6 +35,7 @@ import type { AppConfig } from './config/configuration';
       limit: 30,
     }]),
     PrismaModule,
+    EmailModule,
     UsersModule,
     // @dasoingenieros/auth — modo embedded (CIE standalone)
     AuthModule.register({
@@ -52,6 +56,8 @@ import type { AppConfig } from './config/configuration';
     UnifilarModule,
     TenantsModule,
     SubscriptionsModule,
+    AuthExtensionsModule,
+    OnboardingModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },

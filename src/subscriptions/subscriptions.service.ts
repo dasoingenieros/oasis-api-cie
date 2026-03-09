@@ -90,6 +90,22 @@ export class SubscriptionsService {
     };
   }
 
+  async getUsage(tenantId: string) {
+    const tenant = await this.prisma.tenant.findUnique({
+      where: { id: tenantId },
+    });
+    if (!tenant) throw new BadRequestException('Tenant no encontrado');
+
+    const isFreePlan = tenant.maxCertsTotal > 0 && tenant.maxCertsTotal <= 2;
+
+    return {
+      certsGenerated: tenant.certCount,
+      maxCerts: tenant.maxCertsTotal,
+      plan: isFreePlan ? 'free' : (tenant.subscriptionStatus === 'active' ? 'pro' : 'free'),
+      subscriptionStatus: tenant.subscriptionStatus,
+    };
+  }
+
   async handleWebhook(rawBody: Buffer, signature: string) {
     if (!this.stripe) throw new BadRequestException('Stripe no configurado');
 

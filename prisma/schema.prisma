@@ -45,7 +45,7 @@ model Tenant {
   certCount     Int      @default(0)
   certResetDate DateTime @default(now())
   maxCertsMonth Int      @default(-1) // -1 = ilimitado
-  maxCertsTotal Int      @default(-1) // -1 = ilimitado
+  maxCertsTotal Int      @default(2)  // Free = 2, -1 = ilimitado
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -72,8 +72,10 @@ model User {
   // RGPD
   acceptedPrivacy   Boolean   @default(false)
   acceptedPrivacyAt DateTime?
-  emailVerified     Boolean   @default(false)
-  emailVerifyToken  String?
+  emailVerified      Boolean   @default(false)
+  emailVerifyToken   String?
+  emailVerifyExpires DateTime?
+  onboardingCompleted Boolean  @default(false)
 
   // Datos firmante
   signerRegNum     String?
@@ -261,6 +263,15 @@ model Installation {
 
   // ═══ INFO ADICIONAL ═══
   infoAdicional String?
+
+  // ═══ LEGACY FIELDS (frontend compatibility) ═══
+  titularName     String?
+  titularAddress  String?
+  address         String?
+  contractedPower Float?
+  installerName   String?
+  installerNif    String?
+  installerRegNum String?
 
   // ═══ CIE ESPECÍFICOS ═══
   identificadorCie   String?

@@ -52,8 +52,8 @@ export class InstallationsService {
 
     return this.prisma.installation.create({
       data: {
-        ...autoFill,   // primero auto-relleno
-        ...dto,        // luego DTO (sobrescribe si el usuario envió algo)
+        ...autoFill,       // primero auto-relleno
+        ...(dto as any),   // luego DTO (sobrescribe si el usuario envió algo)
         userId: user.id,
         tenantId: user.tenantId,
         status: InstallationStatus.DRAFT,
