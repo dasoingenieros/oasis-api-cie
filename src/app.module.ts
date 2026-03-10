@@ -20,6 +20,8 @@ import { SubscriptionsModule } from './subscriptions/subscriptions.module';
 import { EmailModule } from './email/email.module';
 import { AuthExtensionsModule } from './auth-extensions/auth-extensions.module';
 import { OnboardingModule } from './onboarding/onboarding.module';
+import { WaitlistModule } from './waitlist/waitlist.module';
+import { ConsentModule } from './consent/consent.module';
 import configuration from './config/configuration';
 import type { AppConfig } from './config/configuration';
 
@@ -58,6 +60,8 @@ import type { AppConfig } from './config/configuration';
     SubscriptionsModule,
     AuthExtensionsModule,
     OnboardingModule,
+    WaitlistModule,
+    ConsentModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },

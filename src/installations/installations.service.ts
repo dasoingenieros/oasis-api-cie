@@ -50,9 +50,34 @@ export class InstallationsService {
       if (fullUser.instaladorCertNum) autoFill.instaladorCertNum = fullUser.instaladorCertNum;
     }
 
+    // ── Wizard → legacy field mapping ──
+    const wizardMapped: Record<string, any> = {};
+
+    // expedienteType → tipoActuacion
+    if (dto.expedienteType && !dto.tipoActuacion) {
+      const exp = dto.expedienteType;
+      if (exp === 'NUEVA') wizardMapped.tipoActuacion = 'NUEVA';
+      else if (exp.startsWith('AMPLIACION')) wizardMapped.tipoActuacion = 'AMPLIACION';
+      else if (exp.startsWith('MODIFICACION')) wizardMapped.tipoActuacion = 'MODIFICACION';
+    }
+
+    // installationType → supplyType (where applicable)
+    if (dto.installationType && !dto.supplyType) {
+      const t = dto.installationType;
+      if (t === 'vivienda') {
+        wizardMapped.supplyType = dto.gradoElectrificacion === 'ELEVADO'
+          ? 'VIVIENDA_ELEVADA' : 'VIVIENDA_BASICA';
+      } else if (t === 'irve') {
+        wizardMapped.supplyType = 'IRVE';
+      } else if (t === 'local' || t === 'industrial') {
+        wizardMapped.supplyType = 'LOCAL_COMERCIAL';
+      }
+    }
+
     return this.prisma.installation.create({
       data: {
         ...autoFill,       // primero auto-relleno
+        ...wizardMapped,   // mapeos wizard→legacy
         ...(dto as any),   // luego DTO (sobrescribe si el usuario envió algo)
         userId: user.id,
         tenantId: user.tenantId,
@@ -108,19 +133,26 @@ export class InstallationsService {
     const installation = await this.findOne(id, user);
     this.checkAccess(installation, user);
 
-    if (installation.status !== InstallationStatus.DRAFT && installation.status !== InstallationStatus.CALCULATED) {
+    // Solo impedir borrar si está en estado terminal (COMPLETED)
+    if (installation.status === InstallationStatus.COMPLETED) {
       throw new ForbiddenException(
-        'Solo se pueden eliminar instalaciones en estado DRAFT',
+        'No se pueden eliminar instalaciones completadas',
       );
     }
 
-   // Borrar registros relacionados primero
-await this.prisma.calculationResult.deleteMany({ where: { installationId: id } });
-await this.prisma.circuit.deleteMany({ where: { installationId: id } });
-await this.prisma.document.deleteMany({ where: { installationId: id } });
-await this.prisma.differential.deleteMany({ where: { panelId: { in: (await this.prisma.electricalPanel.findMany({ where: { installationId: id }, select: { id: true } })).map(p => p.id) } } });
-await this.prisma.electricalPanel.deleteMany({ where: { installationId: id } });
-await this.prisma.installation.delete({ where: { id } });
+    // Borrar registros relacionados primero
+    await this.prisma.unifilarLayout.deleteMany({ where: { installationId: id } });
+    await this.prisma.photo.deleteMany({ where: { installationId: id } });
+    await this.prisma.signingRequest.deleteMany({ where: { installationId: id } });
+    await this.prisma.calculationResult.deleteMany({ where: { installationId: id } });
+    await this.prisma.circuit.deleteMany({ where: { installationId: id } });
+    await this.prisma.document.deleteMany({ where: { installationId: id } });
+    const panels = await this.prisma.electricalPanel.findMany({ where: { installationId: id }, select: { id: true } });
+    if (panels.length > 0) {
+      await this.prisma.differential.deleteMany({ where: { panelId: { in: panels.map(p => p.id) } } });
+    }
+    await this.prisma.electricalPanel.deleteMany({ where: { installationId: id } });
+    await this.prisma.installation.delete({ where: { id } });
   }
 
   private checkAccess(installation: Installation, user: SafeUser): void {

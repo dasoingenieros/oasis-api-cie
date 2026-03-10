@@ -41,6 +41,10 @@ COPY --from=builder /app/packages ./packages
 COPY --from=builder /app/prisma ./prisma
 COPY --from=builder /app/package.json ./
 
+# Copy non-TS assets (templates, Python scripts) that nest build may not copy
+COPY --from=builder /app/src/assets ./dist/src/assets
+COPY --from=builder /app/src/documents/templates ./dist/src/documents/templates
+
 RUN groupadd -r appuser && useradd -r -g appuser -d /app appuser \
     && mkdir -p /app/tmp /app/.config && chown -R appuser:appuser /app
 USER appuser

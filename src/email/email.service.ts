@@ -82,8 +82,11 @@ export class EmailService {
           Crear mi primer certificado
         </a>
       </div>
-      <p style="margin:0;color:#6B7280;font-size:14px;">
+      <p style="margin:0 0 16px;color:#6B7280;font-size:14px;">
         ¿Necesitas más? Consulta nuestros <a href="${this.appUrl}/pricing" style="color:#3B82F6;text-decoration:underline;">planes desde 19€/mes</a>.
+      </p>
+      <p style="margin:0;padding-top:12px;border-top:1px solid #E5E7EB;color:#9CA3AF;font-size:11px;line-height:1.5;">
+        Recuerda que CIE Platform es una herramienta de asistencia al cálculo y generación de documentación. Los resultados generados no sustituyen el criterio del técnico competente habilitado, quien es el único responsable del contenido de los certificados firmados.
       </p>
     `);
 
@@ -106,10 +109,18 @@ export class EmailService {
     </div>
     <!-- Footer -->
     <div style="text-align:center;margin-top:32px;padding-top:24px;border-top:1px solid #E5E7EB;">
-      <p style="margin:0 0 4px;color:#9CA3AF;font-size:12px;">DASO Ingenieros S.L.P.</p>
+      <p style="margin:0 0 4px;color:#9CA3AF;font-size:12px;">DASO Ingenieros S.L.P. — CIF: B-XXXXXXXX</p>
       <p style="margin:0 0 4px;color:#9CA3AF;font-size:12px;">CIE Platform — Certificados de Instalación Eléctrica</p>
-      <p style="margin:0;color:#9CA3AF;font-size:11px;">
+      <p style="margin:0 0 8px;color:#9CA3AF;font-size:11px;">
         Este email fue enviado a la dirección asociada a tu cuenta.
+      </p>
+      <p style="margin:0 0 4px;color:#9CA3AF;font-size:10px;">
+        CIE Platform es una herramienta de asistencia al cálculo. Los resultados no sustituyen el criterio profesional del técnico competente.
+      </p>
+      <p style="margin:0;color:#9CA3AF;font-size:10px;">
+        <a href="${this.appUrl}/legal/terminos" style="color:#9CA3AF;text-decoration:underline;">Términos</a> ·
+        <a href="${this.appUrl}/legal/privacidad" style="color:#9CA3AF;text-decoration:underline;">Privacidad</a> ·
+        <a href="${this.appUrl}/legal/cookies" style="color:#9CA3AF;text-decoration:underline;">Cookies</a>
       </p>
     </div>
   </div>

@@ -57,6 +57,13 @@ export class CreateInstallationDto {
   @IsString() @IsOptional() usoInstalacion?: string;
   @IsString() @IsOptional() aforo?: string;
   @IsString() @IsOptional() tipoInstalacionCie?: string;
+  @IsString() @IsOptional() installationType?: string;
+  @IsString() @IsOptional() expedienteType?: string;
+  @IsString() @IsOptional() referencia?: string;
+  @IsInt() @IsOptional() puntosRecarga?: number;
+  @IsString() @IsOptional() esquemaIve?: string;
+  @IsNumber() @IsOptional() potenciaPico?: number;
+  @IsString() @IsOptional() modalidadAutoconsumo?: string;
   @IsString() @IsOptional() gradoElectrificacion?: string;
   @IsInt() @IsOptional() temporalidad?: number;
   @IsString() @IsOptional() numRegistroExistente?: string;

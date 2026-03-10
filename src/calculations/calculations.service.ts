@@ -182,7 +182,7 @@ export class CalculationsService {
       data: {
         seccionDi: result.di.sectionMm2,
         potMaxAdmisible: result.designPowerW / 1000, // W → kW
-        gradoElectrificacion: result.electrificationGrade?.toUpperCase() ?? undefined,
+        gradoElectrificacion: result.electrificationGrade === 'elevated' ? 'ELEVADO' : result.electrificationGrade === 'basic' ? 'BASICO' : undefined,
         igaNominal: result.iga.ratingA,
         seccionCondProteccion: result.protectionConductorMm2,
         diferencialNominal: result.differentials[0]?.ratingA ?? undefined,

@@ -4,9 +4,10 @@
 // ============================================================
 
 import {
-  Injectable, NotFoundException, BadRequestException, ForbiddenException, Logger,
+  Injectable, NotFoundException, BadRequestException, ForbiddenException, Logger, Inject,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { SubscriptionsService } from '../subscriptions/subscriptions.service';
 import { generateMtdPdf, MtdInstallationData, MtdCircuitData } from './mtd-pdf-generator';
 import { CieExcelGeneratorService } from './cie-excel-generator.service';
 import { SolicitudBtGeneratorService } from './solicitud-bt-generator.service';
@@ -17,6 +18,7 @@ export class DocumentsService {
 
   constructor(
     private prisma: PrismaService,
+    @Inject(SubscriptionsService) private readonly subscriptionsService: SubscriptionsService,
     private readonly cieGenerator: CieExcelGeneratorService,
     private readonly solicitudGenerator: SolicitudBtGeneratorService,
   ) {}
@@ -92,7 +94,10 @@ export class DocumentsService {
 
   // ─── Generar MTD u otros ───────────────────────────────────
 
-  async generate(installationId: string, tenantId: string, type: string) {
+  async generate(installationId: string, tenantId: string, type: string, userId?: string) {
+    // Check user plan limit
+    if (userId) await this.subscriptionsService.checkCanGenerate(userId);
+
     const installation = await this.verifyInstallation(installationId, tenantId, true);
 
     const latestCalc = await this.prisma.calculationResult.findFirst({
@@ -128,12 +133,15 @@ export class DocumentsService {
 
     const document = await this.prisma.document.create({
       data: {
-        installationId, type: type as any, filename,
+        installationId, userId, type: type as any, filename,
         storageKey: `pending/${filename}`, mimeType,
         sizeBytes: buffer.length, content: buffer,
         version: existingCount + 1, isDraft: true,
       },
     });
+
+    // Increment user cert counter
+    if (userId) await this.subscriptionsService.incrementCertsGenerated(userId);
 
     this.logger.log(`Documento ${type} generado: ${filename} (${buffer.length} bytes, v${existingCount + 1})`);
 
@@ -147,9 +155,9 @@ export class DocumentsService {
 
   // ─── Generar CIE (.xls + .pdf) ────────────────────────────
 
-  async generateCie(installationId: string, tenantId: string) {
-    // Verificar límite del plan ANTES de generar
-    await this.checkCieLimit(tenantId);
+  async generateCie(installationId: string, tenantId: string, userId?: string) {
+    // Check user plan limit
+    if (userId) await this.subscriptionsService.checkCanGenerate(userId);
 
     await this.verifyInstallation(installationId, tenantId);
     const result = await this.cieGenerator.generate(installationId);
@@ -160,7 +168,7 @@ export class DocumentsService {
 
     const xlsDoc = await this.prisma.document.create({
       data: {
-        installationId, type: 'CERTIFICADO',
+        installationId, userId, type: 'CERTIFICADO',
         filename: `${result.baseFilename}${versionSuffix}.xls`,
         storageKey: `cie/${installationId}/${result.baseFilename}${versionSuffix}.xls`,
         mimeType: 'application/vnd.ms-excel',
@@ -174,22 +182,25 @@ export class DocumentsService {
       data: { identificadorCie: result.cieIdentificador, status: 'DOCUMENTED' },
     });
 
-    // Incrementar contador CIE del tenant
-    await this.incrementCertCount(tenantId);
+    // Increment user cert counter
+    if (userId) await this.subscriptionsService.incrementCertsGenerated(userId);
 
     this.logger.log(`CIE generado: ${result.cieIdentificador}`);
 
     return {
       xlsDoc: { id: xlsDoc.id, filename: xlsDoc.filename },
       xlsBuffer: result.xlsBuffer,
-      pdfBuffer: result.pdfBuffer, // Disponible para descarga directa, no se guarda en BD
+      pdfBuffer: result.pdfBuffer,
       cieIdentificador: result.cieIdentificador,
     };
   }
 
   // ─── Generar Solicitud BT (.docx + .pdf) ──────────────────
 
-  async generateSolicitud(installationId: string, tenantId: string) {
+  async generateSolicitud(installationId: string, tenantId: string, userId?: string) {
+    // Check user plan limit
+    if (userId) await this.subscriptionsService.checkCanGenerate(userId);
+
     await this.verifyInstallation(installationId, tenantId);
     const result = await this.solicitudGenerator.generate(installationId);
 
@@ -199,7 +210,7 @@ export class DocumentsService {
 
     const docxDoc = await this.prisma.document.create({
       data: {
-        installationId, type: 'SOLICITUD',
+        installationId, userId, type: 'SOLICITUD',
         filename: `${result.baseFilename}${versionSuffix}.docx`,
         storageKey: `solicitud/${installationId}/${result.baseFilename}${versionSuffix}.docx`,
         mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
@@ -208,12 +219,15 @@ export class DocumentsService {
       },
     });
 
+    // Increment user cert counter
+    if (userId) await this.subscriptionsService.incrementCertsGenerated(userId);
+
     this.logger.log(`Solicitud BT generada: docx=${result.docxBuffer.length}B`);
 
     return {
       docxDoc: { id: docxDoc.id, filename: docxDoc.filename },
       docxBuffer: result.docxBuffer,
-      pdfBuffer: result.pdfBuffer, // Disponible para descarga directa, no se guarda en BD
+      pdfBuffer: result.pdfBuffer,
     };
   }
 

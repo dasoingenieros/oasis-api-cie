@@ -1,7 +1,21 @@
-import { Injectable, Logger, BadRequestException } from '@nestjs/common';
+import { Injectable, Logger, ForbiddenException, BadRequestException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import Stripe from 'stripe';
 import { PrismaService } from '../prisma/prisma.service';
+
+export const PLAN_LIMITS: Record<string, number> = {
+  FREE: 2,
+  PRO: -1,
+  EMPRESA: -1,
+};
+
+export interface UsageResponse {
+  plan: string;
+  certsGenerated: number;
+  maxCerts: number;
+  isLimited: boolean;
+  remaining: number;
+}
 
 @Injectable()
 export class SubscriptionsService {
@@ -20,6 +34,55 @@ export class SubscriptionsService {
       this.stripe = new Stripe(key);
     }
   }
+
+  // ─── User-level plan methods ──────────────────────────────
+
+  async getUsage(userId: string): Promise<UsageResponse> {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user) throw new BadRequestException('Usuario no encontrado');
+
+    const plan = (user as any).plan ?? 'FREE';
+    const certsGenerated = (user as any).certsGenerated ?? 0;
+    const maxCerts = (user as any).maxCerts ?? 2;
+    const isLimited = maxCerts !== -1;
+    const remaining = isLimited ? Math.max(0, maxCerts - certsGenerated) : -1;
+
+    return { plan, certsGenerated, maxCerts, isLimited, remaining };
+  }
+
+  async checkCanGenerate(userId: string): Promise<void> {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user) throw new BadRequestException('Usuario no encontrado');
+
+    const maxCerts = (user as any).maxCerts ?? 2;
+    const certsGenerated = (user as any).certsGenerated ?? 0;
+
+    if (maxCerts !== -1 && certsGenerated >= maxCerts) {
+      throw new ForbiddenException({
+        code: 'CERT_LIMIT_REACHED',
+        message: `Has alcanzado el límite de ${maxCerts} documentos de tu plan. Mejora tu plan para seguir generando.`,
+        certsGenerated,
+        maxCerts,
+      });
+    }
+  }
+
+  async incrementCertsGenerated(userId: string): Promise<void> {
+    await (this.prisma.user as any).update({
+      where: { id: userId },
+      data: { certsGenerated: { increment: 1 } },
+    });
+  }
+
+  async updatePlan(userId: string, plan: string): Promise<void> {
+    const maxCerts = PLAN_LIMITS[plan] ?? 2;
+    await (this.prisma.user as any).update({
+      where: { id: userId },
+      data: { plan, maxCerts },
+    });
+  }
+
+  // ─── Stripe (existing, unchanged) ────────────────────────
 
   async createCheckoutSession(tenantId: string, userId: string, priceId: string) {
     if (!this.stripe) throw new BadRequestException('Stripe no configurado');
@@ -74,38 +137,6 @@ export class SubscriptionsService {
     return { url: session.url };
   }
 
-  async getCurrentPlan(tenantId: string) {
-    const tenant = await this.prisma.tenant.findUnique({
-      where: { id: tenantId },
-    });
-    if (!tenant) throw new BadRequestException('Tenant no encontrado');
-
-    return {
-      tenantName: tenant.name,
-      maxCertsMonth: tenant.maxCertsMonth,
-      maxCertsTotal: tenant.maxCertsTotal,
-      certCount: tenant.certCount,
-      subscriptionStatus: tenant.subscriptionStatus,
-      isFreePlan: tenant.maxCertsTotal > 0 && tenant.maxCertsTotal <= 2,
-    };
-  }
-
-  async getUsage(tenantId: string) {
-    const tenant = await this.prisma.tenant.findUnique({
-      where: { id: tenantId },
-    });
-    if (!tenant) throw new BadRequestException('Tenant no encontrado');
-
-    const isFreePlan = tenant.maxCertsTotal > 0 && tenant.maxCertsTotal <= 2;
-
-    return {
-      certsGenerated: tenant.certCount,
-      maxCerts: tenant.maxCertsTotal,
-      plan: isFreePlan ? 'free' : (tenant.subscriptionStatus === 'active' ? 'pro' : 'free'),
-      subscriptionStatus: tenant.subscriptionStatus,
-    };
-  }
-
   async handleWebhook(rawBody: Buffer, signature: string) {
     if (!this.stripe) throw new BadRequestException('Stripe no configurado');
 
@@ -155,7 +186,7 @@ export class SubscriptionsService {
       data: {
         stripeSubscriptionId: subscriptionId,
         subscriptionStatus: 'active',
-        maxCertsMonth: 100, // Default paid plan limit
+        maxCertsMonth: 100,
         maxCertsTotal: -1,
         certCount: 0,
         certResetDate: new Date(new Date().getFullYear(), new Date().getMonth() + 1, 1),
@@ -180,7 +211,7 @@ export class SubscriptionsService {
           subscriptionStatus: status,
           stripeSubscriptionId: null,
           maxCertsMonth: -1,
-          maxCertsTotal: 2, // Back to free tier
+          maxCertsTotal: 2,
         },
       });
       this.logger.log(`Tenant ${tenant.id} downgraded to free (${status})`);

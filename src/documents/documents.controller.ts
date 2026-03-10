@@ -22,7 +22,7 @@ export class DocumentsController {
     @Body() dto: GenerateDocumentDto,
     @Request() req: any,
   ) {
-    return this.documentsService.generate(installationId, req.user.tenantId, dto.type);
+    return this.documentsService.generate(installationId, req.user.tenantId, dto.type, req.user.id);
   }
 
   /** CIE — ?format=xls|pdf */
@@ -33,7 +33,7 @@ export class DocumentsController {
     @Request() req: any,
     @Res() res: Response,
   ) {
-    const result = await this.documentsService.generateCie(installationId, req.user.tenantId);
+    const result = await this.documentsService.generateCie(installationId, req.user.tenantId, req.user.id);
     if (format === 'pdf') {
       const pdfFilename = result.xlsDoc.filename.replace('.xls', '.pdf');
       res.set({ 'Content-Type': 'application/pdf', 'Content-Disposition': `attachment; filename="${pdfFilename}"`, 'Content-Length': String(result.pdfBuffer.length) });
@@ -51,7 +51,7 @@ export class DocumentsController {
     @Request() req: any,
     @Res() res: Response,
   ) {
-    const result = await this.documentsService.generateSolicitud(installationId, req.user.tenantId);
+    const result = await this.documentsService.generateSolicitud(installationId, req.user.tenantId, req.user.id);
     if (format === 'pdf' && result.pdfBuffer.length > 0) {
       const pdfFilename = result.docxDoc.filename.replace('.docx', '.pdf');
       res.set({ 'Content-Type': 'application/pdf', 'Content-Disposition': `attachment; filename="${pdfFilename}"`, 'Content-Length': String(result.pdfBuffer.length) });

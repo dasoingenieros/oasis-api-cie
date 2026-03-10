@@ -77,6 +77,11 @@ model User {
   emailVerifyExpires DateTime?
   onboardingCompleted Boolean  @default(false)
 
+  // Plan / límites
+  plan            String  @default("FREE")   // FREE, PRO, EMPRESA
+  certsGenerated  Int     @default(0)
+  maxCerts        Int     @default(2)        // FREE=2, PRO/EMPRESA=-1 (ilimitado)
+
   // Datos firmante
   signerRegNum     String?
   signerCategory   String?
@@ -110,9 +115,11 @@ model User {
   installations Installation[]
   documents     Document[]
   auditLogs     AuditLog[]
+  consentLogs   ConsentLog[]
 
   @@unique([tenantId, email])
   @@index([tenantId])
+  @@index([plan])
 }
 
 enum UserRole {
@@ -175,6 +182,13 @@ model Installation {
   usoInstalacion       String?
   aforo                String?
   tipoInstalacionCie   String?          // Tipo detallado CIE (79 tipos)
+  installationType     String?          // Wizard: vivienda, local, industrial, irve...
+  expedienteType       String?          // Wizard: NUEVA, AMPLIACION, AMPLIACION_CAMBIO_TITULAR...
+  referencia           String?          // Referencia libre del usuario
+  puntosRecarga        Int?             // Solo IRVE: nº puntos
+  esquemaIve           String?          // Solo IRVE: 4a, 4b
+  potenciaPico         Float?           // Solo FV: kWp
+  modalidadAutoconsumo String?          // Solo FV: sin_excedentes, con_excedentes_acogida, con_excedentes_no_acogida
   gradoElectrificacion String?          // "BASICO" | "ELEVADO"
   temporalidad         Int?
   numRegistroExistente String?
@@ -603,4 +617,39 @@ enum AuditAction {
   LOGOUT
   EXPORT
   GENERATE
+}
+
+// ── Consent Log ─────────────────────────────────────────────────────────────
+
+model ConsentLog {
+  id              String   @id @default(cuid())
+  tenantId        String
+  userId          String
+  consentType     String   // tos, privacy, cookies, marketing, competence_declaration, certificate_responsibility
+  documentVersion String   // TOS-v1.0, PRIV-v1.0, etc.
+  accepted        Boolean  @default(true)
+  ipAddress       String?
+  userAgent       String?
+  method          String   @default("checkbox") // checkbox, banner, modal
+  certificateId   String?
+  createdAt       DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([consentType])
+  @@index([documentVersion])
+}
+
+// ── Waitlist (Próximamente) ─────────────────────────────────────────────────
+
+model WaitlistEntry {
+  id               String   @id @default(cuid())
+  tenantId         String
+  email            String
+  installationType String
+  createdAt        DateTime @default(now())
+
+  @@index([tenantId])
+  @@index([installationType])
 }

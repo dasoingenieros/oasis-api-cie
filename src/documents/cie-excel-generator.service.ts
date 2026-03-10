@@ -141,7 +141,11 @@ export class CieExcelGeneratorService {
 
     // Defaults
     if (!data['esquemaDistribucion']) data['esquemaDistribucion'] = 'TT';
-    if (!data['tipoActuacion']) data['tipoActuacion'] = 'Nueva';
+    // Map tipoActuacion to CIE Excel template dropdown values
+    const actuacionCieMap: Record<string, string> = {
+      NUEVA: 'Nueva', MODIFICACION: 'Modificación', AMPLIACION: 'Ampliación con o sin modif.',
+    };
+    data['tipoActuacion'] = actuacionCieMap[data['tipoActuacion']] || data['tipoActuacion'] || 'Nueva';
     if (!data['firmaLugar']) data['firmaLugar'] = 'MADRID';
     if (!data['firmaFecha']) data['firmaFecha'] = new Date();
 

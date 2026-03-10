@@ -8,18 +8,18 @@ import { SubscriptionsService } from './subscriptions.service';
 export class SubscriptionsController {
   constructor(private readonly subscriptionsService: SubscriptionsService) {}
 
-  /** Plan actual del tenant */
+  /** Plan actual del usuario */
   @Get('current')
   @UseGuards(JwtAuthGuard)
   getCurrentPlan(@Request() req: any) {
-    return this.subscriptionsService.getCurrentPlan(req.user.tenantId);
+    return this.subscriptionsService.getUsage(req.user.id);
   }
 
   /** Usage stats: certsGenerated, maxCerts, plan */
   @Get('usage')
   @UseGuards(JwtAuthGuard)
   getUsage(@Request() req: any) {
-    return this.subscriptionsService.getUsage(req.user.tenantId);
+    return this.subscriptionsService.getUsage(req.user.id);
   }
 
   /** Crear sesión de Stripe Checkout para upgrade */
