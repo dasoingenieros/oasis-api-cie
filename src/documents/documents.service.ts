@@ -286,7 +286,7 @@ export class DocumentsService {
       titularApellido1: inst.titularApellido1, titularApellido2: inst.titularApellido2,
       titularDireccion, titularLocalidad: inst.titularLocalidad, titularCp: inst.titularCp,
       emplazDireccion, emplazLocalidad: inst.emplazLocalidad, emplazCp: inst.emplazCp,
-      usoInstalacion: inst.usoInstalacion, tension: inst.supplyVoltage || 230,
+      usoInstalacion: inst.tipoInstalacionCie || inst.usoInstalacion, tension: inst.supplyVoltage || 230,
       gradoElectrificacion: inst.gradoElectrificacion,
       memoriaPor: memoriaPorMap[inst.tipoActuacion] || 'N',
       superficieM2: inst.superficieM2, puntoConexion: inst.puntoConexion,
