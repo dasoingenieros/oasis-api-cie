@@ -142,6 +142,7 @@ model Installation {
   status   InstallationStatus @default(DRAFT)
 
   // ═══ DATOS DEL TITULAR ═══
+  holderDocType       String?   @default("NIF") // NIF, NIE, PASAPORTE
   titularNif          String?
   titularNombre       String?
   titularApellido1    String?
@@ -323,9 +324,10 @@ model Installation {
   calculations   CalculationResult[]
   documents      Document[]
   photos         Photo[]
-  signingRequests SigningRequest[]
-  panel          ElectricalPanel?
-  unifilarLayout UnifilarLayout?
+  signingRequests        SigningRequest[]
+  panel                  ElectricalPanel?
+  unifilarLayout         UnifilarLayout?
+  tramitacionExpedientes TramitacionExpediente[]
 
   @@index([tenantId])
   @@index([userId])
@@ -697,6 +699,57 @@ model Technician {
   installations Installation[]
 
   @@index([tenantId])
+}
+
+// ── Tramitación ASEICAM ────────────────────────────────────────────────────
+
+model TramitacionConfig {
+  id             String   @id @default(cuid())
+  tenantId       String   @unique
+  portalUsername  String?  // cifrado AES-256
+  portalPassword  String?  // cifrado AES-256
+  portalEiciId   String?  // UUID EICI preferida
+  portalEiciName String?  // Nombre para mostrar
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+}
+
+model TramitacionExpediente {
+  id               String            @id @default(cuid())
+  tenantId         String
+  installationId   String
+  portalExpediente String?            // Nº expediente del portal
+  eiciId           String?
+  eiciNombre       String?
+  status           TramitacionStatus @default(QUEUED)
+  currentStep      String?
+  progress         Int               @default(0) // 0-100%
+  errorMessage     String?
+  portalData       Json?             // Snapshot datos enviados
+  needsInputData   Json?             // Candidatos RECONO cuando NEEDS_INPUT
+  screenshots      Json?             // Paths a screenshots de debug
+  attempts         Int               @default(0)
+  sentAt           DateTime?
+  completedAt      DateTime?
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+
+  installation Installation @relation(fields: [installationId], references: [id])
+
+  @@index([tenantId])
+  @@index([installationId])
+  @@index([status])
+}
+
+enum TramitacionStatus {
+  QUEUED
+  IN_PROGRESS
+  NEEDS_INPUT
+  SAVED
+  DOCUMENTS_UPLOADED
+  SENT
+  REGISTERED
+  ERROR
 }
 
 // ── Waitlist (Próximamente) ─────────────────────────────────────────────────

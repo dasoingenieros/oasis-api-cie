@@ -33,6 +33,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
+# Playwright Chromium for portal automation (tramitación ASEICAM)
+RUN npx playwright install --with-deps chromium
+
 WORKDIR /app
 
 COPY --from=builder /app/dist ./dist
