@@ -28,8 +28,8 @@ export class SolicitudBtGeneratorService {
   private readonly scriptPath: string;
 
   constructor(private readonly prisma: PrismaService) {
-    this.templatePath = path.join(__dirname, '..', 'assets', 'NUEVA_SOLICITUD_BT_GENERICA.docx');
-    this.scriptPath = path.join(__dirname, '..', 'assets', 'solicitud_bt_fill.py');
+    this.templatePath = path.join(__dirname, '..', '..', 'assets', 'NUEVA_SOLICITUD_BT_GENERICA.docx');
+    this.scriptPath = path.join(__dirname, '..', '..', 'assets', 'solicitud_bt_fill.py');
   }
 
   async generate(installationId: string): Promise<SolicitudGenerationResult> {

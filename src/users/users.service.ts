@@ -8,10 +8,18 @@ import * as bcrypt from 'bcrypt';
 import * as crypto from 'crypto';
 
 /**
+ * CieLookupUser — extends LookupUser with CIE-specific fields.
+ */
+export interface CieLookupUser extends LookupUser {
+  emailVerified: boolean;
+  onboardingCompleted: boolean;
+}
+
+/**
  * SafeUser — backward-compatible type used across controllers/services.
  * Maps to LookupUser from @dasoingenieros/auth (what @CurrentUser() injects).
  */
-export type SafeUser = LookupUser & { tenantId: string };
+export type SafeUser = CieLookupUser & { tenantId: string };
 
 @Injectable()
 export class UsersService implements UserLookupService {
@@ -187,11 +195,20 @@ export class UsersService implements UserLookupService {
     const installationIds = installations.map((i) => i.id);
 
     await this.prisma.$transaction([
+      // 1. Delete installation children (FK → installationId)
+      this.prisma.signingRequest.deleteMany({ where: { installationId: { in: installationIds } } }),
+      this.prisma.photo.deleteMany({ where: { installationId: { in: installationIds } } }),
+      this.prisma.calculationResult.deleteMany({ where: { installationId: { in: installationIds } } }),
       this.prisma.document.deleteMany({ where: { installationId: { in: installationIds } } }),
       this.prisma.circuit.deleteMany({ where: { installationId: { in: installationIds } } }),
       this.prisma.electricalPanel.deleteMany({ where: { installationId: { in: installationIds } } }),
       this.prisma.unifilarLayout.deleteMany({ where: { installationId: { in: installationIds } } }),
+      // 2. Delete installations
       this.prisma.installation.deleteMany({ where: { userId } }),
+      // 3. Delete user children (FK → userId)
+      this.prisma.auditLog.deleteMany({ where: { userId } }),
+      this.prisma.consentLog.deleteMany({ where: { userId } }),
+      // 4. Delete user
       this.prisma.user.delete({ where: { id: userId } }),
     ]);
   }
@@ -204,7 +221,7 @@ export class UsersService implements UserLookupService {
     });
   }
 
-  private toLookupUser(user: any): LookupUser {
+  private toLookupUser(user: any): CieLookupUser {
     return {
       id: user.id,
       tenantId: user.tenantId,
@@ -217,6 +234,6 @@ export class UsersService implements UserLookupService {
       password: undefined,
       emailVerified: user.emailVerified ?? false,
       onboardingCompleted: user.onboardingCompleted ?? false,
-    } as LookupUser;
+    };
   }
 }

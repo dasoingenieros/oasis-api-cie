@@ -79,6 +79,8 @@ export class InstallationsService {
         wizardMapped.supplyType = 'IRVE';
       } else if (t === 'local' || t === 'industrial') {
         wizardMapped.supplyType = 'LOCAL_COMERCIAL';
+      } else if (t === 'autoconsumo') {
+        wizardMapped.supplyType = 'LOCAL_COMERCIAL';
       }
     }
 

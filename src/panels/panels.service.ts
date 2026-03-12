@@ -3,7 +3,8 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { InstallationsService } from '../installations/installations.service';
 import type { SafeUser } from '../users/users.service';
-import type { SavePanelWithDifferentialsDto } from './dto/panel.dto';
+import type { SavePanelWithDifferentialsDto, SaveCuadroDto } from './dto/panel.dto';
+import type { CreateCircuitDto } from '../circuits/dto/create-circuit.dto';
 
 /** Calibres IGA normalizados */
 const IGA_RATINGS = [10, 15, 16, 20, 25, 32, 40, 50, 63];
@@ -240,6 +241,9 @@ export class PanelsService {
 
       // 4. Borrar resultados de cálculo
       await tx.calculationResult.deleteMany({ where: { installationId } });
+
+      // 5. Resetear estado de la instalación a DRAFT
+      await tx.installation.update({ where: { id: installationId }, data: { status: 'DRAFT' } });
     });
 
     return { success: true };
@@ -312,16 +316,20 @@ export class PanelsService {
       }
       case 'VIVIENDA_BASICA':
       default: {
-        // 1 diferencial con todos (max 5 circuitos)
-        const differentials = [{
-          name: 'Diferencial 1',
-          order: 1,
+        // ITC-BT-25: máximo 5 circuitos por diferencial
+        const chunks: typeof circuits[] = [];
+        for (let i = 0; i < circuits.length; i += 5) {
+          chunks.push(circuits.slice(i, i + 5));
+        }
+        const differentials = chunks.map((chunk, i) => ({
+          name: `Diferencial ${i + 1}`,
+          order: i + 1,
           calibreA: 40,
           sensitivityMa: 30,
           type: 'AC',
           poles: igaPoles,
-          circuitIds: circuits.map((c) => c.id),
-        }];
+          circuitIds: chunk.map((c) => c.id),
+        }));
 
         return this.savePanel(installationId, {
           panel: {
@@ -335,5 +343,144 @@ export class PanelsService {
         }, user);
       }
     }
+  }
+
+  /**
+   * Transactional save: circuits + installation fields + panel + differentials.
+   * Prevents orphaned circuits if the panel save fails.
+   */
+  async saveCuadro(
+    installationId: string,
+    dto: SaveCuadroDto,
+    user: SafeUser,
+  ) {
+    await this.installationsService.findOne(installationId, user);
+
+    const { circuits: circuitDtos, panel: panelDto, installationUpdates } = dto;
+    const igaCalibreA = panelDto.panel.igaCalibreA ?? 25;
+    const voltage = panelDto.panel.voltage ?? 230;
+    const igaPoles = panelDto.panel.igaPoles ?? (voltage === 400 ? 4 : 2);
+    const maxPowerW = calcMaxPowerW(igaCalibreA, voltage, igaPoles);
+
+    const savedCircuits = await this.prisma.$transaction(async (tx) => {
+      // 1. Replace all circuits
+      await tx.circuit.deleteMany({ where: { installationId } });
+      await tx.unifilarLayout.deleteMany({ where: { installationId } });
+      await tx.circuit.createMany({
+        data: circuitDtos.map((c: any) => ({
+          ...c,
+          cableType: (c.cableType || 'CU').toUpperCase(),
+          insulationType: (c.insulationType || 'PVC').toUpperCase(),
+          installMethod: (c.installMethod || 'A1').toUpperCase(),
+          maniobraType: c.maniobraType ? c.maniobraType.toUpperCase() : null,
+          maniobraExtra: c.maniobraExtra ?? undefined,
+          installationId,
+          cosPhi: c.cosPhi ?? 0.9,
+          tempCorrFactor: c.tempCorrFactor ?? 1.0,
+          groupCorrFactor: c.groupCorrFactor ?? 1.0,
+        })),
+      });
+      const newCircuits = await tx.circuit.findMany({
+        where: { installationId },
+        orderBy: { order: 'asc' },
+      });
+
+      // 2. Update installation fields (DI, IGA, voltage, etc.)
+      if (installationUpdates && Object.keys(installationUpdates).length > 0) {
+        await tx.installation.update({
+          where: { id: installationId },
+          data: installationUpdates,
+        });
+      }
+
+      // 3. Upsert panel
+      const panel = await tx.electricalPanel.upsert({
+        where: { installationId },
+        create: {
+          installationId,
+          igaCalibreA,
+          igaCurve: panelDto.panel.igaCurve ?? 'C',
+          igaPowerCutKa: panelDto.panel.igaPowerCutKa ?? 6,
+          igaPoles,
+          voltage,
+          maxPowerW,
+        },
+        update: {
+          igaCalibreA,
+          igaCurve: panelDto.panel.igaCurve ?? 'C',
+          igaPowerCutKa: panelDto.panel.igaPowerCutKa ?? 6,
+          igaPoles,
+          voltage,
+          maxPowerW,
+        },
+      });
+
+      // 4. Sync differentials
+      const dtoIds = panelDto.differentials.filter((d) => d.id).map((d) => d.id!);
+      await tx.differential.deleteMany({
+        where: { panelId: panel.id, id: { notIn: dtoIds } },
+      });
+
+      for (const diffDto of panelDto.differentials) {
+        let diff;
+        if (diffDto.id) {
+          diff = await tx.differential.update({
+            where: { id: diffDto.id },
+            data: {
+              name: diffDto.name, order: diffDto.order,
+              calibreA: diffDto.calibreA, sensitivityMa: diffDto.sensitivityMa,
+              type: diffDto.type, poles: diffDto.poles ?? igaPoles,
+            },
+          });
+        } else {
+          diff = await tx.differential.create({
+            data: {
+              panelId: panel.id,
+              name: diffDto.name ?? `Diferencial ${diffDto.order ?? 1}`,
+              order: diffDto.order ?? 1,
+              calibreA: diffDto.calibreA ?? 40,
+              sensitivityMa: diffDto.sensitivityMa ?? 30,
+              type: diffDto.type ?? 'AC',
+              poles: diffDto.poles ?? igaPoles,
+            },
+          });
+        }
+
+        // Assign circuits to differential (resolve _order:N placeholders)
+        if (diffDto.circuitIds) {
+          await tx.circuit.updateMany({
+            where: { differentialId: diff.id },
+            data: { differentialId: null },
+          });
+          const resolvedIds = diffDto.circuitIds.map((cid) => {
+            if (cid.startsWith('_order:')) {
+              const order = parseInt(cid.slice(7), 10);
+              const found = newCircuits.find((c) => c.order === order);
+              return found?.id ?? cid;
+            }
+            return cid;
+          }).filter((id) => !id.startsWith('_order:'));
+          if (resolvedIds.length > 0) {
+            await tx.circuit.updateMany({
+              where: { id: { in: resolvedIds } },
+              data: { differentialId: diff.id },
+            });
+          }
+        }
+      }
+
+      return newCircuits;
+    });
+
+    // Validate protections (outside tx, non-critical)
+    const panel = await this.prisma.electricalPanel.findUnique({ where: { installationId } });
+    if (panel) {
+      await this.validateProtections(panel.id, igaCalibreA);
+    }
+
+    // Return full panel with circuits
+    const fullPanel = await this.getPanel(installationId, user);
+
+    return { circuits: savedCircuits, panel: fullPanel };
   }
 }

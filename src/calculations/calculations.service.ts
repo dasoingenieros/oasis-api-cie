@@ -130,7 +130,11 @@ export class CalculationsService {
     const voltage = inst.supplyVoltage ?? 230;
     const phaseSystem: 'single' | 'three' = voltage === 400 ? 'three' : 'single';
     const userIgaA = panel?.igaCalibreA ?? inst.igaNominal ?? 25;
-    const userPotMaxKw = inst.potMaxAdmisible ?? 5.75;
+    // P. Máx. Admisible: 1) datos-form, 2) derivada del IGA (V × calibre)
+    const igaDerivedPowerKw = phaseSystem === 'three'
+      ? (Math.sqrt(3) * voltage * userIgaA) / 1000
+      : (voltage * userIgaA) / 1000;
+    const userPotMaxKw = inst.potMaxAdmisible ?? igaDerivedPowerKw;
     const userSeccionDi = inst.seccionDi ?? 6;
     const diLengthM = inst.longitudDi ?? 10;
     const materialDi: 'Cu' | 'Al' = inst.materialDi === 'AL' ? 'Al' : 'Cu';
@@ -149,12 +153,6 @@ export class CalculationsService {
 
     // ── PE conductor ───────────────────────────────────────
     const peMm2 = getProtectionConductorSection(userSeccionDi);
-
-    // ── I cálculo = P / (V × cosφ) ────────────────────────
-    const cosPhiDi = 0.9;
-    const nominalCurrentA = phaseSystem === 'three'
-      ? (userPotMaxKw * 1000) / (Math.sqrt(3) * voltage * cosPhiDi)
-      : (userPotMaxKw * 1000) / (voltage * cosPhiDi);
 
     // ── Grado electrificación (informativo) ────────────────
     const isResidential = ['VIVIENDA_BASICA', 'VIVIENDA_ELEVADA'].includes(inst.supplyType);
@@ -198,7 +196,6 @@ export class CalculationsService {
       electrificationGrade,
       iga: {
         ratingA: userIgaA,
-        nominalCurrentA: Math.round(nominalCurrentA * 100) / 100,
       },
       di: {
         sectionMm2: userSeccionDi,

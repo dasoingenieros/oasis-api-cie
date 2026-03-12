@@ -13,7 +13,7 @@ import {
 import { JwtAuthGuard } from '@dasoingenieros/auth';
 import { PanelsService } from './panels.service';
 import type { SafeUser } from '../users/users.service';
-import { SavePanelWithDifferentialsDto } from './dto/panel.dto';
+import { SavePanelWithDifferentialsDto, SaveCuadroDto } from './dto/panel.dto';
 
 @Controller('installations/:installationId/panel')
 @UseGuards(JwtAuthGuard)
@@ -43,6 +43,19 @@ export class PanelsController {
     @Request() req: { user: SafeUser },
   ) {
     return this.panelsService.savePanel(installationId, dto, req.user);
+  }
+
+  /**
+   * PUT /api/v1/installations/:id/panel/save-all
+   * Transactional: replace circuits + update installation + save panel/differentials
+   */
+  @Put('save-all')
+  async saveCuadro(
+    @Param('installationId') installationId: string,
+    @Body() dto: SaveCuadroDto,
+    @Request() req: { user: SafeUser },
+  ) {
+    return this.panelsService.saveCuadro(installationId, dto, req.user);
   }
 
   /**

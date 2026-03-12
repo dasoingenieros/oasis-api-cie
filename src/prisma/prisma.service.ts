@@ -47,6 +47,8 @@ export class PrismaService
     await this.$transaction([
       this.auditLog.deleteMany(),
       this.signingRequest.deleteMany(),
+      this.consentLog.deleteMany(),
+      this.waitlistEntry.deleteMany(),
       this.photo.deleteMany(),
       this.document.deleteMany(),
       this.calculationResult.deleteMany(),
@@ -55,6 +57,8 @@ export class PrismaService
       this.differential.deleteMany(),
       this.electricalPanel.deleteMany(),
       this.installation.deleteMany(),
+      this.installer.deleteMany(),
+      this.technician.deleteMany(),
       this.user.deleteMany(),
       this.tenant.deleteMany(),
     ]);

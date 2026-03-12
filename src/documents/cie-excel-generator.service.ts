@@ -50,8 +50,8 @@ export class CieExcelGeneratorService {
   private static readonly waitQueue: Array<() => void> = [];
 
   constructor(private readonly prisma: PrismaService) {
-    this.templatePath = path.join(__dirname, '..', 'assets', 'CERTIFICADO_BASICO.xls');
-    this.unoScriptPath = path.join(__dirname, '..', 'assets', 'cie_uno_fill.py');
+    this.templatePath = path.join(__dirname, '..', '..', 'assets', 'CERTIFICADO_BASICO.xls');
+    this.unoScriptPath = path.join(__dirname, '..', '..', 'assets', 'cie_uno_fill.py');
   }
 
   private async acquireLock(): Promise<void> {

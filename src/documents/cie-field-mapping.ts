@@ -45,7 +45,7 @@ export const TITULAR_FIELDS: CieFieldMapping[] = [
   { cell: 'T12', col: 'T',  row: 11, field: 'representanteNif',   type: 'db', valueType: 'string' },
 ];
 
-// ─── EMPLAZAMIENTO (10 campos) ───────────────────────────────────────────────
+// ─── EMPLAZAMIENTO (11 campos) ───────────────────────────────────────────────
 
 export const EMPLAZAMIENTO_FIELDS: CieFieldMapping[] = [
   { cell: 'C16', col: 'C',  row: 15, field: 'emplazTipoVia',     type: 'db', valueType: 'string' },
@@ -57,6 +57,7 @@ export const EMPLAZAMIENTO_FIELDS: CieFieldMapping[] = [
   { cell: 'H17', col: 'H',  row: 16, field: 'emplazPiso',        type: 'db', valueType: 'string' },
   { cell: 'J17', col: 'J',  row: 16, field: 'emplazPuerta',      type: 'db', valueType: 'string' },
   { cell: 'M17', col: 'M',  row: 16, field: 'emplazLocalidad',   type: 'db', valueType: 'string' },
+  { cell: 'C18', col: 'C',  row: 17, field: 'emplazProvincia',   type: 'db', valueType: 'string' },
   { cell: 'E18', col: 'E',  row: 17, field: 'contadorUbicacion', type: 'db', valueType: 'string' },
 ];
 

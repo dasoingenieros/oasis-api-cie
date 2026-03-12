@@ -95,8 +95,9 @@ export class DocumentsService {
   // ─── Generar MTD u otros ───────────────────────────────────
 
   async generate(installationId: string, tenantId: string, type: string, userId?: string) {
-    // Check user plan limit
+    // Check both user-level and tenant-level limits
     if (userId) await this.subscriptionsService.checkCanGenerate(userId);
+    await this.checkCieLimit(tenantId);
 
     const installation = await this.verifyInstallation(installationId, tenantId, true);
 
@@ -140,8 +141,9 @@ export class DocumentsService {
       },
     });
 
-    // Increment user cert counter
+    // Increment user + tenant cert counters
     if (userId) await this.subscriptionsService.incrementCertsGenerated(userId);
+    await this.incrementCertCount(tenantId);
 
     this.logger.log(`Documento ${type} generado: ${filename} (${buffer.length} bytes, v${existingCount + 1})`);
 
@@ -156,8 +158,9 @@ export class DocumentsService {
   // ─── Generar CIE (.xls + .pdf) ────────────────────────────
 
   async generateCie(installationId: string, tenantId: string, userId?: string) {
-    // Check user plan limit
+    // Check both user-level and tenant-level limits
     if (userId) await this.subscriptionsService.checkCanGenerate(userId);
+    await this.checkCieLimit(tenantId);
 
     await this.verifyInstallation(installationId, tenantId);
     const result = await this.cieGenerator.generate(installationId);
@@ -182,8 +185,9 @@ export class DocumentsService {
       data: { identificadorCie: result.cieIdentificador, status: 'DOCUMENTED' },
     });
 
-    // Increment user cert counter
+    // Increment user + tenant cert counters
     if (userId) await this.subscriptionsService.incrementCertsGenerated(userId);
+    await this.incrementCertCount(tenantId);
 
     this.logger.log(`CIE generado: ${result.cieIdentificador}`);
 
@@ -198,8 +202,9 @@ export class DocumentsService {
   // ─── Generar Solicitud BT (.docx + .pdf) ──────────────────
 
   async generateSolicitud(installationId: string, tenantId: string, userId?: string) {
-    // Check user plan limit
+    // Check both user-level and tenant-level limits
     if (userId) await this.subscriptionsService.checkCanGenerate(userId);
+    await this.checkCieLimit(tenantId);
 
     await this.verifyInstallation(installationId, tenantId);
     const result = await this.solicitudGenerator.generate(installationId);
@@ -219,8 +224,9 @@ export class DocumentsService {
       },
     });
 
-    // Increment user cert counter
+    // Increment user + tenant cert counters
     if (userId) await this.subscriptionsService.incrementCertsGenerated(userId);
+    await this.incrementCertCount(tenantId);
 
     this.logger.log(`Solicitud BT generada: docx=${result.docxBuffer.length}B`);
 

@@ -4,9 +4,11 @@ import {
   IsNumber,
   IsString,
   IsArray,
+  IsObject,
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
+import { CreateCircuitDto } from '../../circuits/dto/create-circuit.dto';
 
 export class UpsertPanelDto {
   @IsOptional() @IsNumber() igaCalibreA?: number;
@@ -36,4 +38,19 @@ export class SavePanelWithDifferentialsDto {
   @ValidateNested({ each: true })
   @Type(() => UpsertDifferentialDto)
   differentials!: UpsertDifferentialDto[];
+}
+
+export class SaveCuadroDto {
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => CreateCircuitDto)
+  circuits!: CreateCircuitDto[];
+
+  @ValidateNested()
+  @Type(() => SavePanelWithDifferentialsDto)
+  panel!: SavePanelWithDifferentialsDto;
+
+  @IsOptional()
+  @IsObject()
+  installationUpdates?: Record<string, any>;
 }

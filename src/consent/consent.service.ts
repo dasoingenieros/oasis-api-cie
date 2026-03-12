@@ -18,7 +18,7 @@ export class ConsentService {
   constructor(private readonly prisma: PrismaService) {}
 
   async logConsent(params: LogConsentParams) {
-    return (this.prisma as any).consentLog.create({
+    return this.prisma.consentLog.create({
       data: {
         userId: params.userId,
         tenantId: params.tenantId,
@@ -38,14 +38,14 @@ export class ConsentService {
   }
 
   async getUserConsents(userId: string, tenantId: string) {
-    return (this.prisma as any).consentLog.findMany({
+    return this.prisma.consentLog.findMany({
       where: { userId, tenantId },
       orderBy: { createdAt: 'desc' },
     });
   }
 
   async hasAcceptedVersion(userId: string, consentType: string, version: string): Promise<boolean> {
-    const entry = await (this.prisma as any).consentLog.findFirst({
+    const entry = await this.prisma.consentLog.findFirst({
       where: { userId, consentType, documentVersion: version, accepted: true },
     });
     return !!entry;

@@ -53,6 +53,7 @@ model Tenant {
   users         User[]
   installations Installation[]
   auditLogs     AuditLog[]
+  consentLogs   ConsentLog[]
   installers    Installer[]
   technicians   Technician[]
 }
@@ -640,8 +641,10 @@ model ConsentLog {
   certificateId   String?
   createdAt       DateTime @default(now())
 
-  user User @relation(fields: [userId], references: [id])
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id])
 
+  @@index([tenantId])
   @@index([userId])
   @@index([consentType])
   @@index([documentVersion])

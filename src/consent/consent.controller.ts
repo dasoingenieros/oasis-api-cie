@@ -1,10 +1,10 @@
 import { Controller, Post, Get, Body, Req, UseGuards } from '@nestjs/common';
-import { AuthGuard } from '@nestjs/passport';
+import { JwtAuthGuard } from '@dasoingenieros/auth';
 import { ConsentService } from './consent.service';
 import { CreateConsentDto } from './dto/create-consent.dto';
 
 @Controller('consent')
-@UseGuards(AuthGuard('jwt'))
+@UseGuards(JwtAuthGuard)
 export class ConsentController {
   constructor(private readonly consentService: ConsentService) {}
 

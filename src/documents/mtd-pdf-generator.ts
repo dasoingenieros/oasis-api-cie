@@ -21,7 +21,7 @@ import {
   PAGE6_DOC_CHECKBOXES,
 } from './mtd-field-mapping';
 
-const TEMPLATE_PATH = path.join(__dirname, 'templates', 'MTD_BASICO.pdf');
+const TEMPLATE_PATH = path.join(__dirname, '..', '..', 'documents', 'templates', 'MTD_BASICO.pdf');
 
 // ─── Tipos ──────────────────────────────────────────────────
 
