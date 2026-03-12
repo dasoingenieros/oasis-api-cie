@@ -39,6 +39,7 @@ export interface CircuitInput {
     installationTypeItcBt26?: InstallationTypeItcBt26;
     installationTypeItcBt20?: InstallationTypeItcBt20;
     insulationVoltage?: InsulationVoltage;
+    loadType?: string;
 }
 export interface CircuitResult {
     id: string;

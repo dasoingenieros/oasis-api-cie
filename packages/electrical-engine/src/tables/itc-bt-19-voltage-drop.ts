@@ -35,7 +35,12 @@ export const CDT_LIMITS_PCT: Record<CircuitLoadType, number> = {
  * Determina el tipo de carga (alumbrado o fuerza) por el código de circuito.
  * ITC-BT-19 §2.2
  */
-export function getLoadType(circuitCode: string): CircuitLoadType {
+export function getLoadType(circuitCode: string, loadTypeOverride?: string): CircuitLoadType {
+  // If an explicit loadType is provided, map it to lighting/power
+  if (loadTypeOverride) {
+    if (loadTypeOverride === 'ALUMBRADO' || loadTypeOverride === 'ALUMBRADO_EMERGENCIA') return 'lighting';
+    return 'power';
+  }
   const lightingCircuits = ["C1", "C6", "C11"]; // Alumbrado y domótica
   return lightingCircuits.includes(circuitCode) ? "lighting" : "power";
 }
@@ -54,6 +59,7 @@ export interface VoltagDropInput {
   voltageV?: number;
   upstreamCdtPct?: number;       // CdT acumulada aguas arriba (%)
   circuitCode?: string;          // Para determinar límite automáticamente
+  loadType?: string;             // Override: FUERZA, ALUMBRADO, ALUMBRADO_EMERGENCIA, MOTOR, etc.
 }
 
 export interface VoltageDropResult {
@@ -105,7 +111,7 @@ export function calculateVoltageDrop(input: VoltagDropInput): VoltageDropResult 
   const accumulatedCdtPct = voltageDropPct + upstreamCdt;
 
   // Límite aplicable
-  const loadType = input.circuitCode ? getLoadType(input.circuitCode) : "power";
+  const loadType = input.circuitCode ? getLoadType(input.circuitCode, input.loadType) : (input.loadType ? getLoadType('', input.loadType) : "power");
   const limitPct = CDT_LIMITS_PCT[loadType];
   const isCompliant = accumulatedCdtPct <= limitPct;
   const marginPct = limitPct - accumulatedCdtPct;

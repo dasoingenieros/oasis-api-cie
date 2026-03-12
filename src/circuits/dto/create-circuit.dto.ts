@@ -69,9 +69,9 @@ export class CreateCircuitDto {
   @IsOptional()
   groupCorrFactor?: number;
 
-  @IsBoolean()
+  @IsString()
   @IsOptional()
-  isLighting?: boolean;
+  loadType?: string;
 
   @IsString()
   @IsOptional()

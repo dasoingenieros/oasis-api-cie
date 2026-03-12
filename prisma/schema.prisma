@@ -422,7 +422,7 @@ model Circuit {
   tempCorrFactor  Float          @default(1.0)
   groupCorrFactor Float          @default(1.0)
 
-  isLighting      Boolean @default(false)
+  loadType        String  @default("FUERZA")
 
   breakerCurve    String  @default("C")
   breakerCutKa    Int     @default(6)

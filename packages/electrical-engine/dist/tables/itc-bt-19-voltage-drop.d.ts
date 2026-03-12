@@ -25,7 +25,7 @@ export declare const CDT_LIMITS_PCT: Record<CircuitLoadType, number>;
  * Determina el tipo de carga (alumbrado o fuerza) por el código de circuito.
  * ITC-BT-19 §2.2
  */
-export declare function getLoadType(circuitCode: string): CircuitLoadType;
+export declare function getLoadType(circuitCode: string, loadTypeOverride?: string): CircuitLoadType;
 export interface VoltagDropInput {
     nominalCurrentA: number;
     lengthM: number;
@@ -38,6 +38,7 @@ export interface VoltagDropInput {
     voltageV?: number;
     upstreamCdtPct?: number;
     circuitCode?: string;
+    loadType?: string;
 }
 export interface VoltageDropResult {
     voltageDropPct: number;

@@ -139,6 +139,9 @@ export interface CircuitInput {
   installationTypeItcBt26?: InstallationTypeItcBt26;  // Tipo instalación interior (default: E.T.F.)
   installationTypeItcBt20?: InstallationTypeItcBt20;  // Tipo instalación enlace (default: T.P.)
   insulationVoltage?: InsulationVoltage;               // Tensión aislamiento (default: 450/750V interior, 0.6/1kV enlace)
+
+  // Tipo de carga (override para CdT limit)
+  loadType?: string;  // FUERZA, ALUMBRADO, ALUMBRADO_EMERGENCIA, MOTOR, RESISTIVO, IRVE, DOMOTICA
 }
 
 // ─── Resultado del cálculo de un circuito ────────────────────────────────

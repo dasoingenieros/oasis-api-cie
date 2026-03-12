@@ -68,7 +68,7 @@ function calculateItcBt25Circuit(input: CircuitInput): CircuitResult {
   const calculatedPowerW = V * In;
 
   // 3. Caída de tensión con sección ITC-BT-25
-  const loadType = getLoadType(input.code);
+  const loadType = getLoadType(input.code, input.loadType);
   const cdtLimit = CDT_LIMITS_PCT[loadType];
   let sectionIncreased = false;
   const originalSection = sectionMm2;
@@ -83,6 +83,7 @@ function calculateItcBt25Circuit(input: CircuitInput): CircuitResult {
     powerFactor: input.powerFactor,
     upstreamCdtPct: input.upstreamCdtPct ?? 0,
     circuitCode: input.code,
+    loadType: input.loadType,
     voltageV: V,
   });
 
@@ -100,6 +101,7 @@ function calculateItcBt25Circuit(input: CircuitInput): CircuitResult {
         powerFactor: input.powerFactor,
         upstreamCdtPct: input.upstreamCdtPct ?? 0,
         circuitCode: input.code,
+        loadType: input.loadType,
         voltageV: V,
       });
       if (vdResult.isCompliant) {
@@ -240,6 +242,7 @@ function calculateCustomCircuit(input: CircuitInput): CircuitResult {
     powerFactor: input.powerFactor,
     upstreamCdtPct: input.upstreamCdtPct ?? 0,
     circuitCode: input.code,
+    loadType: input.loadType,
     voltageV: input.voltageV,
   });
 

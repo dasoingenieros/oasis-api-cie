@@ -262,6 +262,7 @@ export class CalculationsService {
       groupingCircuits: 1,
       voltageV: circuit.voltage,
       upstreamCdtPct: 0,
+      loadType: (circuit as any).loadType ?? undefined,
     };
   }
 }
