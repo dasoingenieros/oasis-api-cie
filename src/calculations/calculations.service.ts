@@ -9,10 +9,12 @@ import type { Circuit, CalculationResult } from '@prisma/client';
 import {
   calculateInstallation,
   calculateSupply,
+  calculateDIVoltageDrop,
+  getProtectionConductorSection,
   ENGINE_VERSION,
   NORM_VERSION,
 } from '@daso/electrical-engine';
-import type { CircuitInput, CircuitCode, SupplyInput } from '@daso/electrical-engine';
+import type { CircuitInput, CircuitCode, SupplyInput, DIInput } from '@daso/electrical-engine';
 
 @Injectable()
 export class CalculationsService {
@@ -42,7 +44,13 @@ export class CalculationsService {
     }
 
     // 3. Map Prisma Circuit → engine CircuitInput
-    const inputs: CircuitInput[] = circuits.map((c) => this.mapToEngineInput(c));
+    // ITC-BT-25 codes only apply to viviendas; for all other types force CUSTOM
+    const isVivienda = ['VIVIENDA_BASICA', 'VIVIENDA_ELEVADA'].includes(
+      (installation as any).supplyType ?? '',
+    );
+    const inputs: CircuitInput[] = circuits.map((c) =>
+      this.mapToEngineInput(c, isVivienda),
+    );
 
     // 4. Run engine
     const result = await calculateInstallation(inputs);
@@ -67,28 +75,8 @@ export class CalculationsService {
       },
     });
 
-    // 7. Update each circuit with its results
-    for (const circuitResult of result.circuits) {
-      const prismaCircuit = circuits.find((c) => c.id === circuitResult.id);
-      if (!prismaCircuit) continue;
-
-      await this.prisma.circuit.update({
-        where: { id: prismaCircuit.id },
-        data: {
-          calculatedSection: circuitResult.sectionMm2,
-          assignedBreaker: `PIA ${circuitResult.breakerRatingA}A curva ${circuitResult.breakerCurve}`,
-          assignedRCD: circuitResult.rcdSensitivityMa
-            ? `Diferencial ${circuitResult.rcdSensitivityMa}mA`
-            : null,
-          voltageDrop: circuitResult.voltageDropPct,
-          voltageDropAcc: circuitResult.accumulatedCdtPct,
-          compliance: circuitResult.isValid,
-          justification: circuitResult.justification
-            ? JSON.parse(JSON.stringify(circuitResult.justification))
-            : undefined,
-        },
-      });
-    }
+    // 7. Calculation is READ-ONLY — results are stored in CalculationResult only.
+    // Circuit records are never modified by the calculation engine.
 
     // 8. Update installation status
     await this.prisma.installation.update({
@@ -121,8 +109,9 @@ export class CalculationsService {
   }
 
   /**
-   * Calcula IGA + DI + diferenciales para una instalación.
-   * Usa datos de la instalación (tipo, tensión, superficie, circuitos).
+   * Resumen de suministro: lee datos configurados por el usuario (IGA del cuadro,
+   * potencia y sección DI de la instalación) y solo calcula CdT DI + PE.
+   * NO sobreescribe los valores que el usuario configuró.
    */
   async calculateSupplyForInstallation(
     installationId: string,
@@ -131,73 +120,119 @@ export class CalculationsService {
     const installation = await this.installationsService.findOne(installationId, user);
     const inst = installation as any;
 
-    // Determinar tipo
-    const isResidential = ['VIVIENDA_BASICA', 'VIVIENDA_ELEVADA'].includes(inst.supplyType);
+    // ── Leer panel del usuario (IGA) ───────────────────────
+    const panel = await this.prisma.electricalPanel.findUnique({
+      where: { installationId },
+      include: { differentials: true },
+    });
 
-    // Obtener códigos de circuitos
-    const circuitCodes = (
-      await this.prisma.circuit.findMany({
-        where: { installationId },
-        select: { code: true },
-      })
-    )
-      .map((c) => c.code)
-      .filter(Boolean) as string[];
+    // ── Valores del usuario ────────────────────────────────
+    const voltage = inst.supplyVoltage ?? 230;
+    const phaseSystem: 'single' | 'three' = voltage === 400 ? 'three' : 'single';
+    const userIgaA = panel?.igaCalibreA ?? inst.igaNominal ?? 25;
+    const userPotMaxKw = inst.potMaxAdmisible ?? 5.75;
+    const userSeccionDi = inst.seccionDi ?? 6;
+    const diLengthM = inst.longitudDi ?? 10;
+    const materialDi: 'Cu' | 'Al' = inst.materialDi === 'AL' ? 'Al' : 'Cu';
 
-    // Construir input para el motor
-    const input: SupplyInput = {
-      installationType: isResidential ? 'residential' : 'commercial',
-      phaseSystem: inst.supplyVoltage === 400 ? 'three' : 'single',
-      diConductorMaterial: inst.materialDi === 'AL' ? 'Al' : 'Cu',
-      diLengthM: inst.longitudDi ?? 10, // TODO: campo longitudDi pendiente en schema
-      diSectionMm2: inst.seccionDi ?? undefined,
-      surfaceM2: inst.superficieM2 ?? undefined,
-      hasElectricHeating: inst.supplyType === 'VIVIENDA_ELEVADA',
-      hasAirConditioning: inst.supplyType === 'VIVIENDA_ELEVADA',
-      circuitCodes: circuitCodes.length > 0 ? circuitCodes : undefined,
+    // ── Calcular CdT DI con sección y longitud del usuario ─
+    const diInput: DIInput = {
+      contractedPowerW: userPotMaxKw * 1000,
+      phaseSystem,
+      powerFactor: 0.9,
+      conductorMaterial: materialDi,
+      sectionMm2: userSeccionDi,
+      lengthM: diLengthM,
+      voltageV: voltage,
     };
+    const cdtResult = calculateDIVoltageDrop(diInput);
 
-    // Si es comercial, necesitamos potencia contratada
-    // Para viviendas se calcula automáticamente por grado electrificación
-    if (!isResidential) {
-      // Intentar usar potencia total de circuitos como estimación
-      const circuits = await this.prisma.circuit.findMany({
-        where: { installationId },
-        select: { power: true },
-      });
-      const totalPower = circuits.reduce((sum, c) => sum + c.power, 0);
-      if (totalPower > 0) {
-        input.contractedPowerW = totalPower;
-      } else {
-        // Mínimo para local comercial
-        input.contractedPowerW = 3450;
-      }
+    // ── PE conductor ───────────────────────────────────────
+    const peMm2 = getProtectionConductorSection(userSeccionDi);
+
+    // ── I cálculo = P / (V × cosφ) ────────────────────────
+    const cosPhiDi = 0.9;
+    const nominalCurrentA = phaseSystem === 'three'
+      ? (userPotMaxKw * 1000) / (Math.sqrt(3) * voltage * cosPhiDi)
+      : (userPotMaxKw * 1000) / (voltage * cosPhiDi);
+
+    // ── Grado electrificación (informativo) ────────────────
+    const isResidential = ['VIVIENDA_BASICA', 'VIVIENDA_ELEVADA'].includes(inst.supplyType);
+    const electrificationGrade = isResidential
+      ? (inst.supplyType === 'VIVIENDA_ELEVADA' ? 'elevated' : 'basic')
+      : undefined;
+
+    // ── Diferenciales del usuario ──────────────────────────
+    const userDiffs = (panel?.differentials ?? []).map((d: any) => ({
+      ratingA: d.calibreA,
+      sensitivityMa: d.sensitivityMa,
+      type: d.type,
+      poles: d.poles,
+      name: d.name,
+    }));
+
+    // ── Warnings ───────────────────────────────────────────
+    const warnings: string[] = [...cdtResult.warnings];
+    if (!cdtResult.cdtCompliant) {
+      warnings.push(`CdT DI ${cdtResult.voltageDropPct.toFixed(3)}% supera el límite del 1%. Revisa sección o longitud.`);
     }
 
-    const result = calculateSupply(input);
+    const isValid = cdtResult.cdtCompliant;
 
-    // Guardar todos los resultados del suministro en la instalación
+    // ── Solo guardar CdT y PE (NO sobreescribir IGA, potencia, sección) ─
     await this.prisma.installation.update({
       where: { id: installationId },
       data: {
-        seccionDi: result.di.sectionMm2,
-        potMaxAdmisible: result.designPowerW / 1000, // W → kW
-        gradoElectrificacion: result.electrificationGrade === 'elevated' ? 'ELEVADO' : result.electrificationGrade === 'basic' ? 'BASICO' : undefined,
-        igaNominal: result.iga.ratingA,
-        seccionCondProteccion: result.protectionConductorMm2,
-        diferencialNominal: result.differentials[0]?.ratingA ?? undefined,
-        diferencialSensibilidad: result.differentials[0]?.sensitivitityMa ?? undefined,
-        cdtDi: result.di.cdtResult.voltageDropPct,
+        cdtDi: cdtResult.voltageDropPct,
+        seccionCondProteccion: peMm2,
+        gradoElectrificacion: electrificationGrade === 'elevated' ? 'ELEVADO' : electrificationGrade === 'basic' ? 'BASICO' : undefined,
       },
     });
 
-    return result;
+    // Invalidar unifilar guardado
+    await this.prisma.unifilarLayout.deleteMany({ where: { installationId } });
+
+    // ── Resultado con forma SupplyResult usando valores del usuario ─
+    return {
+      designPowerW: userPotMaxKw * 1000,
+      electrificationGrade,
+      iga: {
+        ratingA: userIgaA,
+        nominalCurrentA: Math.round(nominalCurrentA * 100) / 100,
+      },
+      di: {
+        sectionMm2: userSeccionDi,
+        minSectionTableMm2: cdtResult.minSectionCuMm2,
+        minSectionCdtMm2: cdtResult.minSectionByLoadMm2,
+        cdtResult: {
+          voltageDropPct: cdtResult.voltageDropPct,
+          voltageDropV: cdtResult.voltageDropV,
+          cdtLimitPct: cdtResult.cdtLimitPct,
+          cdtCompliant: cdtResult.cdtCompliant,
+          nominalCurrentA: cdtResult.nominalCurrentA,
+        },
+      },
+      protectionConductorMm2: peMm2,
+      differentials: userDiffs,
+      warnings,
+      isValid,
+    };
   }
 
   /**
    * Map a Prisma Circuit to the engine's CircuitInput format.
    */
-  private mapToEngineInput(circuit: Circuit): CircuitInput {
+  /** Map cable designation to engine insulation type (ITC-BT-19 tables) */
+  private mapInsulationType(designation: string): 'PVC' | 'XLPE' | 'EPR' {
+    switch (designation) {
+      case 'H07V-K': case 'H07V-U': case 'H07Z1-K': case 'PVC': return 'PVC';
+      case 'RV-K': case 'RZ1-K': case 'XLPE': return 'XLPE';
+      case 'EPR': return 'EPR';
+      default: return 'PVC';
+    }
+  }
+
+  private mapToEngineInput(circuit: Circuit, isVivienda: boolean): CircuitInput {
     const conductorMaterial = circuit.cableType === 'CU' ? 'Cu' : 'Al';
     const phaseSystem = circuit.phases === 1 ? 'single' : 'three';
 
@@ -205,7 +240,8 @@ export class CalculationsService {
       'C1', 'C2', 'C3', 'C4', 'C4.1', 'C4.2', 'C4.3', 'C5',
       'C6', 'C7', 'C8', 'C9', 'C10', 'C11', 'C12',
     ];
-    const code = validCodes.includes(circuit.code ?? '')
+    // ITC-BT-25 codes only apply to viviendas
+    const code = isVivienda && validCodes.includes(circuit.code ?? '')
       ? (circuit.code as CircuitCode)
       : ('CUSTOM' as CircuitCode);
 
@@ -219,10 +255,10 @@ export class CalculationsService {
       simultaneityFactor: 1,
       loadFactor: 1,
       conductorMaterial,
-      insulationType: circuit.insulationType as 'PVC' | 'XLPE' | 'EPR',
+      insulationType: this.mapInsulationType(circuit.insulationType),
       installationMethod: circuit.installMethod as any,
       lengthM: circuit.length,
-      ambientTempC: 40,
+      ambientTempC: 30,
       groupingCircuits: 1,
       voltageV: circuit.voltage,
       upstreamCdtPct: 0,

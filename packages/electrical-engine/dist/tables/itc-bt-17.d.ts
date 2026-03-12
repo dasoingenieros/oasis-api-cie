@@ -40,7 +40,7 @@ export declare function selectIGARating(params: {
     nominalCurrentA: number;
 };
 export interface DifferentialSpec {
-    sensitivitityMa: DifferentialSensitivity;
+    sensitivityMa: DifferentialSensitivity;
     type: DifferentialType;
     ratingA: number;
     poles: 2 | 4;

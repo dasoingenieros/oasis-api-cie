@@ -22,6 +22,7 @@ import { AuthExtensionsModule } from './auth-extensions/auth-extensions.module';
 import { OnboardingModule } from './onboarding/onboarding.module';
 import { WaitlistModule } from './waitlist/waitlist.module';
 import { ConsentModule } from './consent/consent.module';
+import { TeamModule } from './team/team.module';
 import configuration from './config/configuration';
 import type { AppConfig } from './config/configuration';
 
@@ -62,6 +63,7 @@ import type { AppConfig } from './config/configuration';
     OnboardingModule,
     WaitlistModule,
     ConsentModule,
+    TeamModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },

@@ -218,6 +218,34 @@ export class PanelsService {
   }
 
   /**
+   * Reiniciar cuadro eléctrico: borra circuitos, diferenciales y panel.
+   * NO toca datos de la instalación (pestaña Datos).
+   */
+  async resetPanel(installationId: string, user: SafeUser) {
+    await this.installationsService.findOne(installationId, user);
+
+    await this.prisma.$transaction(async (tx) => {
+      // 1. Borrar circuitos de la instalación
+      await tx.circuit.deleteMany({ where: { installationId } });
+
+      // 2. Borrar diferenciales del panel
+      const panel = await tx.electricalPanel.findUnique({ where: { installationId } });
+      if (panel) {
+        await tx.differential.deleteMany({ where: { panelId: panel.id } });
+        await tx.electricalPanel.delete({ where: { id: panel.id } });
+      }
+
+      // 3. Borrar layout unifilar (si existe)
+      await tx.unifilarLayout.deleteMany({ where: { installationId } });
+
+      // 4. Borrar resultados de cálculo
+      await tx.calculationResult.deleteMany({ where: { installationId } });
+    });
+
+    return { success: true };
+  }
+
+  /**
    * Auto-crear panel con plantilla según tipo de suministro
    */
   async createFromTemplate(

@@ -85,6 +85,15 @@ export interface MtdInstallationData {
   memoriaDescriptiva?: string;
   firmaLugar?: string;
   esquemaDistribucion?: string;
+  // Técnico cualificado
+  tecnicoNombre?: string;
+  tecnicoColegiado?: string;
+  tecnicoDomicilio?: string;
+  tecnicoLocalidad?: string;
+  tecnicoCp?: string;
+  tecnicoTelefono?: string;
+  tecnicoEmail?: string;
+  tecnicoColegio?: string;
   // Página 2 - Previsión cargas
   phaseSystem?: string; // 'single' | 'three'
   cdtDi?: number; // CdT de la DI en %
@@ -227,9 +236,11 @@ function fillPage1(form: PdfForm, inst: MtdInstallationData): void {
   if (inst.tipoElectrodos === 'PLACAS') set('tipoPlacas', 'X');
   if (inst.tipoElectrodos === 'MALLAS') set('tipoMallas', 'X');
 
-  // Instalador
-  set('instaladorNombre', s(inst.instaladorNombre));
-  set('instaladorCertNum', s(inst.instaladorCertNum));
+  // Instalador (always fill — empresa data shared)
+  if (inst.tipoAutor !== 'TECNICO') {
+    set('instaladorNombre', s(inst.instaladorNombre));
+    set('instaladorCertNum', s(inst.instaladorCertNum));
+  }
   set('instaladorDomicilio', s(inst.instaladorDomicilio));
   set('instaladorNum', s(inst.instaladorNum));
   set('instaladorLocalidad', s(inst.instaladorLocalidad));
@@ -237,13 +248,26 @@ function fillPage1(form: PdfForm, inst: MtdInstallationData): void {
   set('instaladorTelefono', s(inst.instaladorTelefono));
   set('instaladorEmail', s(inst.instaladorEmail));
 
+  // Técnico cualificado
+  if (inst.tipoAutor === 'TECNICO') {
+    set('tecnicoNombre', s(inst.tecnicoNombre));
+    set('tecnicoColegiado', s(inst.tecnicoColegiado));
+    set('tecnicoDomicilio', s(inst.tecnicoDomicilio));
+    set('tecnicoLocalidad', s(inst.tecnicoLocalidad));
+    set('tecnicoCp', s(inst.tecnicoCp));
+    set('tecnicoTelefono', s(inst.tecnicoTelefono));
+    set('tecnicoEmail', s(inst.tecnicoEmail));
+    set('tecnicoColegio', s(inst.tecnicoColegio));
+  }
+
   // Firma
   const now = new Date();
   const meses: string[] = [
     'ENERO', 'FEBRERO', 'MARZO', 'ABRIL', 'MAYO', 'JUNIO',
     'JULIO', 'AGOSTO', 'SEPTIEMBRE', 'OCTUBRE', 'NOVIEMBRE', 'DICIEMBRE',
   ];
-  set('firmaNombre', s(inst.instaladorNombre));
+  const firmante = inst.tipoAutor === 'TECNICO' ? inst.tecnicoNombre : inst.instaladorNombre;
+  set('firmaNombre', s(firmante));
   set('firmaLugar', s(inst.firmaLugar || 'MADRID'));
   set('firmaDia', String(now.getDate()));
   set('firmaMes', meses[now.getMonth()] ?? 'ENERO');
@@ -448,7 +472,7 @@ function fillPage4(
       diInt,                                              // INT
       inst.seccionDi ? `${numCond}x${inst.seccionDi}` : '', // NxS
       inst.materialDi || 'CU',                            // MAT
-      '0.6/1KV',                                          // AISL
+      inst.aislamientoDi ? insulationVoltage(inst.aislamientoDi) : '0.6/1kV', // AISL
       mapInstallMethod(inst.tipoInstalacionDi || ''),     // TIPOINST
       '',                                                 // A: Sección Conducto
       '',                                                 // B: Diámetro Tubos
@@ -509,7 +533,7 @@ function fillPage5Circuits(
       intensidad,
       seccion,
       c.cableType || 'CU',
-      '0.6/1KV',
+      insulationVoltage(c.insulationType),
       tipoInst,
       c.length ? c.length.toFixed(0) : '',
       cdt,
@@ -613,6 +637,15 @@ function generateMemoriaDescriptiva(inst: MtdInstallationData): string {
 }
 
 // ─── Helpers ────────────────────────────────────────────────
+
+/** Derive insulation voltage rating from engine insulationType (PVC/XLPE/EPR) */
+function insulationVoltage(insulationType: string): string {
+  switch (insulationType) {
+    case 'PVC': return '450/750V';
+    case 'XLPE': case 'EPR': return '0.6/1kV';
+    default: return '450/750V';
+  }
+}
 
 function mapInstallMethod(method: string): string {
   const map: Record<string, string> = {

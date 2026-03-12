@@ -37,8 +37,8 @@ describe("calculateSupply()", () => {
         it("devuelve 2 diferenciales de 30mA", () => {
             const r = (0, calculate_supply_1.calculateSupply)(baseInput);
             expect(r.differentials).toHaveLength(2);
-            expect(r.differentials[0].sensitivitityMa).toBe(30);
-            expect(r.differentials[1].sensitivitityMa).toBe(30);
+            expect(r.differentials[0].sensitivityMa).toBe(30);
+            expect(r.differentials[1].sensitivityMa).toBe(30);
         });
         it("conductor de protección PE correcto", () => {
             const r = (0, calculate_supply_1.calculateSupply)(baseInput);

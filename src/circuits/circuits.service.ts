@@ -26,7 +26,7 @@ export class CircuitsService {
     // Verifica que la instalación existe y el usuario tiene acceso
     await this.installationsService.findOne(installationId, user);
 
-    return this.prisma.circuit.create({
+    const circuit = await this.prisma.circuit.create({
       data: {
         ...dto,
         maniobraType: dto.maniobraType ? dto.maniobraType.toUpperCase() as any : null,
@@ -36,6 +36,11 @@ export class CircuitsService {
         groupCorrFactor: dto.groupCorrFactor ?? 1.0,
       },
     });
+
+    // Invalidar unifilar guardado (circuitos han cambiado)
+    await this.prisma.unifilarLayout.deleteMany({ where: { installationId } });
+
+    return circuit;
   }
 
   async findAll(installationId: string, user: SafeUser): Promise<Circuit[]> {
@@ -57,20 +62,31 @@ export class CircuitsService {
   }
 
   async update(id: string, dto: UpdateCircuitDto, user: SafeUser): Promise<Circuit> {
-    await this.findOne(id, user);
+    const existing = await this.findOne(id, user);
 
-    return this.prisma.circuit.update({
+    const updated = await this.prisma.circuit.update({
       where: { id },
       data: {
         ...dto,
         maniobraType: dto.maniobraType !== undefined ? (dto.maniobraType ? dto.maniobraType.toUpperCase() as any : null) : undefined,
       } as any,
     });
+
+    // Invalidar unifilar guardado (propiedades del circuito han cambiado)
+    await this.prisma.unifilarLayout.deleteMany({
+      where: { installationId: existing.installationId },
+    });
+
+    return updated;
   }
 
   async remove(id: string, user: SafeUser): Promise<void> {
-    await this.findOne(id, user);
+    const circuit = await this.findOne(id, user);
     await this.prisma.circuit.delete({ where: { id } });
+    // Invalidar unifilar guardado (ya no refleja los circuitos actuales)
+    await this.prisma.unifilarLayout.deleteMany({
+      where: { installationId: circuit.installationId },
+    });
   }
 
   /**
@@ -87,6 +103,9 @@ export class CircuitsService {
     return this.prisma.$transaction(async (tx) => {
       // Borra los existentes
       await tx.circuit.deleteMany({ where: { installationId } });
+
+      // Invalidar unifilar guardado (ya no refleja los circuitos actuales)
+      await tx.unifilarLayout.deleteMany({ where: { installationId } });
 
       // Crea los nuevos
       await tx.circuit.createMany({

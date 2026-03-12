@@ -278,7 +278,10 @@ export class DocumentsService {
     const empresaParts = [inst.empresaTipoVia, inst.empresaNombreVia, inst.empresaNumero].filter(Boolean);
     const empresaDomicilio = empresaParts.join(' ') || '';
 
-    const memoriaPorMap: Record<string, string> = { NUEVA: 'N', MODIFICACION: 'M', AMPLIACION: 'A' };
+    const memoriaPorMap: Record<string, string> = {
+      NUEVA: 'N', MODIFICACION: 'M', AMPLIACION: 'A',
+      'Nueva': 'N', 'Modificación': 'M', 'Ampliación con o sin modif.': 'A',
+    };
     const situacionMap: Record<string, string> = { INTERIOR: 'EN INTERIOR', FACHADA: 'EN FACHADA' };
 
     const mtdData: MtdInstallationData = {
@@ -309,11 +312,22 @@ export class DocumentsService {
       presupuestoMateriales: inst.presupuestoMateriales,
       presupuestoManoObra: inst.presupuestoManoObra, presupuestoTotal: inst.presupuestoTotal,
       tipoAutor: inst.tipoAutor || 'INSTALADOR',
-      instaladorNombre: inst.instaladorNombre || inst.installerName,
-      instaladorCertNum: inst.instaladorCertNum, instaladorDomicilio: empresaDomicilio,
+      instaladorNombre: (inst as any).installer?.nombre || inst.instaladorNombre || inst.installerName,
+      instaladorCertNum: (inst as any).installer?.certNum || inst.instaladorCertNum,
+      instaladorDomicilio: empresaDomicilio,
       instaladorNum: inst.empresaNumero, instaladorLocalidad: inst.empresaLocalidad,
       instaladorCp: inst.empresaCp, instaladorTelefono: inst.empresaTelefono || inst.empresaMovil,
-      instaladorEmail: inst.empresaEmail, memoriaDescriptiva: inst.memoriaDescriptiva,
+      instaladorEmail: inst.empresaEmail,
+      // Técnico cualificado (from FK relation)
+      tecnicoNombre: (inst as any).technician?.nombre,
+      tecnicoColegiado: (inst as any).technician?.numColegiado,
+      tecnicoDomicilio: (inst as any).technician?.direccion,
+      tecnicoLocalidad: (inst as any).technician?.localidad,
+      tecnicoCp: (inst as any).technician?.cp,
+      tecnicoTelefono: (inst as any).technician?.telefono,
+      tecnicoEmail: (inst as any).technician?.email,
+      tecnicoColegio: (inst as any).technician?.colegioOficial,
+      memoriaDescriptiva: inst.memoriaDescriptiva,
       firmaLugar: inst.firmaLugar || 'MADRID', esquemaDistribucion: inst.esquemaDistribucion,
       phaseSystem: inst.supplyVoltage === 400 ? 'three' : 'single',
       cdtDi: inst.cdtDi ?? undefined, contadorUbicacion: inst.contadorUbicacion,
@@ -343,7 +357,9 @@ export class DocumentsService {
   private async verifyInstallation(installationId: string, tenantId: string, includeCircuits = false) {
     const installation = await this.prisma.installation.findFirst({
       where: { id: installationId, tenantId },
-      include: includeCircuits ? { circuits: true } : undefined,
+      include: includeCircuits
+        ? { circuits: true, installer: true, technician: true }
+        : { installer: true, technician: true },
     });
     if (!installation) throw new NotFoundException('Instalación no encontrada');
     return installation;

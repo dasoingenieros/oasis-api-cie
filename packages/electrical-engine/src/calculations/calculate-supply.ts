@@ -162,16 +162,18 @@ export function calculateSupply(input: SupplyInput): SupplyResult {
   const V = input.voltageV ?? (input.phaseSystem === "three" ? 400 : 230);
   const SQRT3 = Math.sqrt(3);
 
-  // Intensidad de cálculo
+  // Intensidad de cálculo DI — usa cosφ de la carga (default 0.9)
+  // La corriente real que circula por la DI incluye el factor de potencia
   const In = input.phaseSystem === "three"
     ? designPowerW / (SQRT3 * V * cosφ)
     : designPowerW / (V * cosφ);
 
   // Sección mínima por tabla ITC-BT-15
-  const tableEntry = DI_SECTION_TABLE.find(e => e.maxCurrentA >= In);
+  const tableEntry = DI_SECTION_TABLE.find(e => e.maxCurrentA >= In)
+    ?? DI_SECTION_TABLE[DI_SECTION_TABLE.length - 1]; // Usar última entrada si In excede tabla
   const minSectionTableMm2 = input.diConductorMaterial === "Cu"
-    ? (tableEntry?.sectionCuMm2 ?? 95)
-    : (tableEntry?.sectionAlMm2 ?? 150);
+    ? tableEntry!.sectionCuMm2
+    : tableEntry!.sectionAlMm2;
 
   // Calcular sección mínima por CdT probando secciones normalizadas
   let minSectionCdtMm2 = minSectionTableMm2;

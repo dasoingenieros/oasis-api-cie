@@ -144,9 +144,10 @@ export class CieExcelGeneratorService {
     // Map tipoActuacion to CIE Excel template dropdown values
     const actuacionCieMap: Record<string, string> = {
       NUEVA: 'Nueva', MODIFICACION: 'Modificación', AMPLIACION: 'Ampliación con o sin modif.',
+      N: 'Nueva', M: 'Modificación', A: 'Ampliación con o sin modif.',
     };
     data['tipoActuacion'] = actuacionCieMap[data['tipoActuacion']] || data['tipoActuacion'] || 'Nueva';
-    if (!data['firmaLugar']) data['firmaLugar'] = 'MADRID';
+    if (!data['firmaLugar']) data['firmaLugar'] = data['emplazLocalidad'] || '';
     if (!data['firmaFecha']) data['firmaFecha'] = new Date();
 
     return data;
@@ -216,7 +217,7 @@ export class CieExcelGeneratorService {
           'ENERO', 'FEBRERO', 'MARZO', 'ABRIL', 'MAYO', 'JUNIO',
           'JULIO', 'AGOSTO', 'SEPTIEMBRE', 'OCTUBRE', 'NOVIEMBRE', 'DICIEMBRE',
         ];
-        const loc = data['firmaLugar'] || data['emplazLocalidad'] || 'MADRID';
+        const loc = data['firmaLugar'] || data['emplazLocalidad'] || '';
         return ` ${loc} A ${d.getDate()} DE ${meses[d.getMonth()]} ${d.getFullYear()}`;
       }
 

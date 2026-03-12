@@ -53,6 +53,8 @@ model Tenant {
   users         User[]
   installations Installation[]
   auditLogs     AuditLog[]
+  installers    Installer[]
+  technicians   Technician[]
 }
 
 // ── User ────────────────────────────────────────────────────────────────────
@@ -295,6 +297,8 @@ model Installation {
 
   // ═══ MTD AUTOR Y MEMORIA ═══
   tipoAutor          String?
+  installerId        String?
+  technicianId       String?
   memoriaDescriptiva String?
 
   // ═══ FIRMA ═══
@@ -312,6 +316,8 @@ model Installation {
 
   tenant         Tenant           @relation(fields: [tenantId], references: [id])
   user           User             @relation(fields: [userId], references: [id])
+  installer      Installer?       @relation(fields: [installerId], references: [id], onDelete: SetNull)
+  technician     Technician?      @relation(fields: [technicianId], references: [id], onDelete: SetNull)
   circuits       Circuit[]
   calculations   CalculationResult[]
   documents      Document[]
@@ -323,6 +329,8 @@ model Installation {
   @@index([tenantId])
   @@index([userId])
   @@index([tenantId, status])
+  @@index([installerId])
+  @@index([technicianId])
 }
 
 enum SupplyType {
@@ -408,11 +416,13 @@ model Circuit {
   phases          Int
   length          Float
   cableType       CableType      @default(CU)
-  insulationType  InsulationType  @default(PVC)
+  insulationType  String         @default("H07V-K")
   installMethod   InstallMethod
   cosPhi          Float          @default(1.0)
   tempCorrFactor  Float          @default(1.0)
   groupCorrFactor Float          @default(1.0)
+
+  isLighting      Boolean @default(false)
 
   breakerCurve    String  @default("C")
   breakerCutKa    Int     @default(6)
@@ -444,11 +454,7 @@ enum CableType {
   AL
 }
 
-enum InsulationType {
-  PVC
-  XLPE
-  EPR
-}
+// Cable designations: H07V-K, H07V-U, H07Z1-K (PVC/70°C), RV-K, RZ1-K (XLPE/90°C), EPR
 
 enum InstallMethod {
   A1
@@ -639,6 +645,55 @@ model ConsentLog {
   @@index([userId])
   @@index([consentType])
   @@index([documentVersion])
+}
+
+// ── Instaladores ─────────────────────────────────────────────────────────────
+
+model Installer {
+  id        String   @id @default(cuid())
+  tenantId  String
+  nombre    String
+  nif       String?
+  certNum   String?  // Nº certificado instalador
+  categoria String?  // Básica | Especialista
+  isDefault Boolean  @default(false)
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  tenant        Tenant         @relation(fields: [tenantId], references: [id])
+  installations Installation[]
+
+  @@index([tenantId])
+}
+
+// ── Técnicos ─────────────────────────────────────────────────────────────────
+
+model Technician {
+  id        String   @id @default(cuid())
+  tenantId  String
+  nombre    String
+  nif       String?
+  titulacion String? // Título profesional
+  numColegiado String? // Nº colegiado
+  colegioOficial String?
+  telefono       String?
+  email          String?
+  direccion      String?
+  localidad      String?
+  provincia      String?
+  cp             String?
+  isDefault Boolean  @default(false)
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  tenant        Tenant         @relation(fields: [tenantId], references: [id])
+  installations Installation[]
+
+  @@index([tenantId])
 }
 
 // ── Waitlist (Próximamente) ─────────────────────────────────────────────────

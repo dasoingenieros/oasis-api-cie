@@ -111,7 +111,7 @@ describe("ITC-BT-17 — getRequiredDifferentials", () => {
       circuits: ["C1"],
     });
     expect(r[0]?.ratingA).toBe(40);
-    expect(r[0]?.sensitivitityMa).toBe(30);
+    expect(r[0]?.sensitivityMa).toBe(30);
   });
 
   it("diferencial rating 63 para IGA > 40", () => {

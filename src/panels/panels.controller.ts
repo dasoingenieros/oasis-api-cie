@@ -4,6 +4,7 @@ import {
   Get,
   Put,
   Post,
+  Delete,
   Param,
   Body,
   UseGuards,
@@ -54,5 +55,18 @@ export class PanelsController {
     @Request() req: { user: SafeUser },
   ) {
     return this.panelsService.createFromTemplate(installationId, req.user);
+  }
+
+  /**
+   * DELETE /api/v1/installations/:id/panel/reset
+   * Reiniciar cuadro eléctrico: borra circuitos, diferenciales y panel.
+   * NO borra datos de la instalación (pestaña Datos).
+   */
+  @Delete('reset')
+  async resetPanel(
+    @Param('installationId') installationId: string,
+    @Request() req: { user: SafeUser },
+  ) {
+    return this.panelsService.resetPanel(installationId, req.user);
   }
 }

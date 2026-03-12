@@ -5,11 +5,12 @@ import {
   IsEnum,
   IsNumber,
   IsInt,
+  IsBoolean,
   Min,
   Max,
 } from 'class-validator';
 import { Transform } from 'class-transformer';
-import { CableType, InsulationType, InstallMethod } from '@prisma/client';
+import { CableType, InstallMethod } from '@prisma/client';
 
 export class CreateCircuitDto {
   @IsString()
@@ -43,9 +44,8 @@ export class CreateCircuitDto {
   @IsEnum(CableType)
   cableType!: CableType;
 
-  @Transform(({ value }) => typeof value === 'string' ? value.toUpperCase() : value)
-  @IsEnum(InsulationType)
-  insulationType!: InsulationType;
+  @IsString()
+  insulationType!: string;
 
   @Transform(({ value }) => typeof value === 'string' ? value.toUpperCase() : value)
   @IsEnum(InstallMethod)
@@ -68,6 +68,10 @@ export class CreateCircuitDto {
   @Max(1)
   @IsOptional()
   groupCorrFactor?: number;
+
+  @IsBoolean()
+  @IsOptional()
+  isLighting?: boolean;
 
   @IsString()
   @IsOptional()

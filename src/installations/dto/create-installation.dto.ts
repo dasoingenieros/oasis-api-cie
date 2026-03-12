@@ -150,6 +150,8 @@ export class CreateInstallationDto {
 
   // ═══ MTD — AUTOR Y MEMORIA ════════════════════════════════════
   @IsString() @IsOptional() tipoAutor?: string;
+  @IsString() @IsOptional() installerId?: string;
+  @IsString() @IsOptional() technicianId?: string;
   @IsString() @IsOptional() memoriaDescriptiva?: string;
 
   // ═══ PRESUPUESTO ══════════════════════════════════════════════

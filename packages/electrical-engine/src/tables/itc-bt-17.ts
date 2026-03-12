@@ -91,7 +91,7 @@ export function selectIGARating(params: {
 // ─── Reglas de selección de diferenciales ────────────────────────────────
 
 export interface DifferentialSpec {
-  sensitivitityMa: DifferentialSensitivity;
+  sensitivityMa: DifferentialSensitivity;
   type: DifferentialType;
   ratingA: number;         // Calibre del diferencial (≥ IGA)
   poles: 2 | 4;            // 2P monofásico, 4P trifásico
@@ -125,26 +125,53 @@ export function getRequiredDifferentials(params: {
   const diffRating = ratingA <= 40 ? 40 : 63;
   const poles = params.phaseSystem === "three" ? 4 : 2;
 
-  const diffs: DifferentialSpec[] = [
-    {
-      sensitivitityMa: 30,
+  // Grupo 1: circuitos generales (C1-C4.x, C6, C7, C11, C12, CUSTOM)
+  const group1Codes = ["C1", "C2", "C3", "C4", "C4.1", "C4.2", "C4.3", "C6", "C7", "C11", "C12", "CUSTOM"];
+  // Grupo 2: circuitos baño/calefacción/AC (C5, C8, C9, C10)
+  const group2Codes = ["C5", "C8", "C9", "C10"];
+
+  const group1Circuits = params.circuits.filter(c => group1Codes.includes(c));
+  const group2Circuits = params.circuits.filter(c => group2Codes.includes(c));
+
+  const diffs: DifferentialSpec[] = [];
+
+  // Solo añadir diferencial si hay circuitos en ese grupo
+  if (group1Circuits.length > 0) {
+    diffs.push({
+      sensitivityMa: 30,
       type: "AC",
       ratingA: diffRating,
       poles,
-      circuitsCovered: ["C1", "C2", "C3", "C4.1", "C4.2", "C4.3"],
+      circuitsCovered: group1Circuits,
       mandatory: true,
       normRef: "ITC-BT-17 §1.2 / ITC-BT-25",
-    },
-    {
-      sensitivitityMa: 30,
+    });
+  }
+
+  if (group2Circuits.length > 0) {
+    diffs.push({
+      sensitivityMa: 30,
       type: "AC",
       ratingA: diffRating,
       poles,
-      circuitsCovered: ["C5", "C8", "C9", "C10"],
+      circuitsCovered: group2Circuits,
       mandatory: true,
       normRef: "ITC-BT-17 §1.2 / ITC-BT-25",
-    },
-  ];
+    });
+  }
+
+  // Mínimo 1 diferencial si hay circuitos
+  if (diffs.length === 0 && params.circuits.length > 0) {
+    diffs.push({
+      sensitivityMa: 30,
+      type: "AC",
+      ratingA: diffRating,
+      poles,
+      circuitsCovered: params.circuits,
+      mandatory: true,
+      normRef: "ITC-BT-17 §1.2",
+    });
+  }
 
   return diffs;
 }

@@ -43,8 +43,16 @@ export class InstallationsService {
       if (tenant.distribuidoraHab) autoFill.distribuidora = tenant.distribuidoraHab;
     }
 
-    // Datos instalador desde user
-    if (fullUser) {
+    // Datos instalador: preferir default Installer del team, fallback a User
+    const defaultInstaller = await this.prisma.installer.findFirst({
+      where: { tenantId: user.tenantId, isDefault: true, deletedAt: null },
+    });
+    if (defaultInstaller) {
+      autoFill.installerId = defaultInstaller.id;
+      autoFill.instaladorNombre = defaultInstaller.nombre;
+      autoFill.instaladorNif = defaultInstaller.nif ?? undefined;
+      autoFill.instaladorCertNum = defaultInstaller.certNum ?? undefined;
+    } else if (fullUser) {
       if (fullUser.instaladorNombre) autoFill.instaladorNombre = fullUser.instaladorNombre;
       if (fullUser.instaladorNif) autoFill.instaladorNif = fullUser.instaladorNif;
       if (fullUser.instaladorCertNum) autoFill.instaladorCertNum = fullUser.instaladorCertNum;
@@ -53,12 +61,12 @@ export class InstallationsService {
     // ── Wizard → legacy field mapping ──
     const wizardMapped: Record<string, any> = {};
 
-    // expedienteType → tipoActuacion
+    // expedienteType → tipoActuacion (exact CIE Excel dropdown values)
     if (dto.expedienteType && !dto.tipoActuacion) {
       const exp = dto.expedienteType;
-      if (exp === 'NUEVA') wizardMapped.tipoActuacion = 'NUEVA';
-      else if (exp.startsWith('AMPLIACION')) wizardMapped.tipoActuacion = 'AMPLIACION';
-      else if (exp.startsWith('MODIFICACION')) wizardMapped.tipoActuacion = 'MODIFICACION';
+      if (exp === 'NUEVA') wizardMapped.tipoActuacion = 'Nueva';
+      else if (exp.startsWith('AMPLIACION')) wizardMapped.tipoActuacion = 'Ampliación con o sin modif.';
+      else if (exp.startsWith('MODIFICACION')) wizardMapped.tipoActuacion = 'Modificación';
     }
 
     // installationType → supplyType (where applicable)

@@ -110,7 +110,7 @@ export class SolicitudBtGeneratorService {
         localidad: inst.emplazLocalidad || '',
       },
       tipoExpediente: {
-        tipo: inst.tipoActuacion || 'NUEVA',
+        tipo: ({ 'Nueva': 'NUEVA', 'Modificación': 'MODIFICACION', 'Ampliación con o sin modif.': 'AMPLIACION' } as Record<string, string>)[inst.tipoActuacion] || inst.tipoActuacion || 'NUEVA',
         numRegistro: inst.numRegistroExistente || '',
       },
       tipoInstalacion: this.mapTipoInstalacion(inst),
