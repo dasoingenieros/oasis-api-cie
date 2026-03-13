@@ -20,6 +20,16 @@ export class NeedsInputError extends Error {
   }
 }
 
+const BROWSER_ARGS = [
+  '--disable-blink-features=AutomationControlled',
+  '--no-sandbox',
+  '--disable-setuid-sandbox',
+  '--disable-dev-shm-usage',
+];
+
+const REAL_USER_AGENT =
+  'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+
 @Injectable()
 export class TramitacionPlaywrightService {
   private readonly logger = new Logger(TramitacionPlaywrightService.name);
@@ -30,7 +40,7 @@ export class TramitacionPlaywrightService {
     this.screenshotsEnabled =
       this.config.get<string>('TRAMITACION_SCREENSHOTS', 'true') === 'true';
     this.stepTimeout = parseInt(
-      this.config.get<string>('TRAMITACION_STEP_TIMEOUT', '15000'),
+      this.config.get<string>('TRAMITACION_STEP_TIMEOUT', '20000'),
       10,
     );
   }
@@ -50,13 +60,11 @@ export class TramitacionPlaywrightService {
     let browser: Browser | null = null;
 
     try {
-      browser = await chromium.launch({
-        headless: true,
-        args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
-      });
+      browser = await chromium.launch({ headless: true, args: BROWSER_ARGS });
       const context = await browser.newContext({
         viewport: { width: 1280, height: 900 },
         locale: 'es-ES',
+        userAgent: REAL_USER_AGENT,
       });
       const page = await context.newPage();
       page.setDefaultTimeout(this.stepTimeout);
@@ -68,7 +76,7 @@ export class TramitacionPlaywrightService {
 
       // Step 2: CREATE_SOLICITUD
       await onProgress('CREATE_SOLICITUD', 10);
-      await this.crearSolicitud(page);
+      await this.crearSolicitud(page, data);
       await this.screenshot(page, expedienteId, 'CREATE_SOLICITUD', screenshots);
 
       // Step 3: FILL_OCA_EICI
@@ -78,12 +86,12 @@ export class TramitacionPlaywrightService {
 
       // Step 4: FILL_EMPLAZAMIENTO
       await onProgress('FILL_EMPLAZAMIENTO', 25);
-      await this.fillEmplazamiento(page, data, expedienteId, resolvedInputs);
+      await this.fillEmplazamiento(page, data, resolvedInputs);
       await this.screenshot(page, expedienteId, 'FILL_EMPLAZAMIENTO', screenshots);
 
       // Step 5: FILL_TITULAR
       await onProgress('FILL_TITULAR', 40);
-      await this.fillTitular(page, data, expedienteId, resolvedInputs);
+      await this.fillTitular(page, data, resolvedInputs);
       await this.screenshot(page, expedienteId, 'FILL_TITULAR', screenshots);
 
       // Step 6: FILL_DATOS_TECNICOS
@@ -130,27 +138,12 @@ export class TramitacionPlaywrightService {
   }): Promise<{ success: boolean; message: string }> {
     let browser: Browser | null = null;
     try {
-      browser = await chromium.launch({
-        headless: true,
-        args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
-      });
-      const page = await browser.newPage();
-      page.setDefaultTimeout(15000);
+      browser = await chromium.launch({ headless: true, args: BROWSER_ARGS });
+      const context = await browser.newContext({ userAgent: REAL_USER_AGENT });
+      const page = await context.newPage();
+      page.setDefaultTimeout(20000);
 
       await this.login(page, credentials);
-
-      // Verify we're logged in — check for navigation or dashboard element
-      const isLoggedIn = await page
-        .waitForSelector('[id*="menubar"], [id*="solicitud"], .ui-layout-content', {
-          timeout: 5000,
-        })
-        .then(() => true)
-        .catch(() => false);
-
-      if (!isLoggedIn) {
-        return { success: false, message: 'Login exitoso pero no se detectó el dashboard' };
-      }
-
       return { success: true, message: 'Conexión exitosa al Portal del Instalador' };
     } catch (err: any) {
       return { success: false, message: err.message || 'Error de conexión' };
@@ -162,238 +155,324 @@ export class TramitacionPlaywrightService {
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
-  // PASO 1: LOGIN
+  // PASO 1: LOGIN — Selectores verificados:
+  //   [id="form_login:username"], [id="form_login:password"], button[type="submit"]
   // ═══════════════════════════════════════════════════════════════════════════
 
   private async login(
     page: Page,
     credentials: { username: string; password: string },
   ): Promise<void> {
-    await page.goto(PORTAL_URLS.login, { waitUntil: 'domcontentloaded' });
-    await page.waitForTimeout(1000);
+    await page.goto(PORTAL_URLS.login);
+    await page.waitForLoadState('networkidle');
 
-    // Fill login form — typical JSF login form
-    const usernameInput = page.locator('input[type="text"][id*="username"], input[name*="username"], input[id*="user"]').first();
-    const passwordInput = page.locator('input[type="password"]').first();
+    await page.fill('[id="form_login:username"]', credentials.username);
+    await page.fill('[id="form_login:password"]', credentials.password);
 
-    await usernameInput.fill(credentials.username);
-    await passwordInput.fill(credentials.password);
+    // PrimeFaces AJAX submit — NO navegación normal, redirige via JS
+    await page.click('button[type="submit"]');
 
-    // Submit
-    const submitBtn = page.locator('button[type="submit"], input[type="submit"], [id*="login"][class*="button"], a[id*="login"]').first();
-    await submitBtn.click();
+    try {
+      await page.waitForURL('**/inicio.jsf', { timeout: 20000 });
+    } catch {
+      await page.waitForTimeout(5000);
+      if (page.url().includes('login')) {
+        throw new Error('Login fallido — credenciales incorrectas o reCAPTCHA bloqueó');
+      }
+    }
+    await page.waitForLoadState('networkidle');
 
-    // Wait for redirect away from login page
-    await page.waitForURL((url) => !url.href.includes('login'), { timeout: 10000 });
-    await page.waitForTimeout(1000);
-    this.logger.log('Login exitoso');
+    this.logger.log(`Login exitoso — ${page.url()}`);
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
   // PASO 2: CREAR SOLICITUD
+  //   Navegación directa + PF widgets + links por texto
   // ═══════════════════════════════════════════════════════════════════════════
 
-  private async crearSolicitud(page: Page): Promise<void> {
-    // Navigate to alta solicitud page
-    await page.goto(PORTAL_URLS.altaSolicitud, { waitUntil: 'domcontentloaded' });
+  private async crearSolicitud(page: Page, data: PortalSolicitudData): Promise<void> {
+    // 2a: Navegar directo a altaSolicitud1 (sin menú)
+    await page.goto(PORTAL_URLS.altaSolicitud1);
+    await page.waitForLoadState('networkidle');
+    this.logger.log('altaSolicitud1.jsf cargado');
+
+    // 2b: Click "INSTALACIONES BAJA TENSIÓN"
+    await page.click('a:has-text("INSTALACIONES BAJA TENSIÓN")');
+    await page.waitForLoadState('networkidle');
+    await page.waitForTimeout(1000);
+    this.logger.log('Campo actuación seleccionado');
+
+    // 2c: Tipo expediente — PF('tipoExpediente')
+    const tipoExp = data.tipoExpediente;
+    await page.evaluate((val) => {
+      const pf = (window as any).PF;
+      if (!pf) throw new Error('PrimeFaces not loaded');
+      const wgt = pf('tipoExpediente');
+      if (!wgt) throw new Error('Widget "tipoExpediente" no encontrado');
+      wgt.selectValue(val);
+      if (typeof wgt.triggerChange === 'function') wgt.triggerChange();
+    }, tipoExp);
     await page.waitForTimeout(2000);
+    this.logger.log(`Tipo expediente seleccionado: ${tipoExp}`);
 
-    // The page typically has a "Crear Solicitud" button or the form is already there
-    // Look for the create button
-    const crearBtn = page.locator(
-      'button:has-text("Crear"), a:has-text("Crear Solicitud"), [id*="crear"], [id*="nueva"]',
-    ).first();
+    // 2d: Subtipo — buscar por texto exacto entre links a[id*="btnCampoActuacion"]
+    const subtipo = data.subtipoSolicitud;
+    const clicked = await page.evaluate((target) => {
+      const links = document.querySelectorAll('a[id*="btnCampoActuacion"]');
+      for (const link of links) {
+        if (link.textContent!.trim() === target) {
+          (link as HTMLElement).click();
+          return true;
+        }
+      }
+      return false;
+    }, subtipo);
 
-    const crearExists = await crearBtn.isVisible().catch(() => false);
-    if (crearExists) {
-      await crearBtn.click();
+    if (!clicked) {
+      throw new Error(`Subtipo "${subtipo}" no encontrado en el portal`);
+    }
+    this.logger.log(`Subtipo seleccionado: ${subtipo}`);
+    await page.waitForTimeout(3000);
+
+    // 2e: Puede haber paso MEMORIA/PROYECTO — para Vivienda es automático
+    const memoriaLink = page.locator('a:has-text("MEMORIA"), a:has-text("Memoria")').first();
+    const memoriaVisible = await memoriaLink.isVisible().catch(() => false);
+    if (memoriaVisible) {
+      await memoriaLink.click();
+      this.logger.log('Tipo documentación seleccionado: MEMORIA');
       await page.waitForTimeout(2000);
     }
 
-    // Wait for the form tabs to appear
-    await page.waitForSelector('.ui-tabs, [id*="tabs"]', { timeout: 10000 });
-    this.logger.log('Solicitud creada, formulario visible');
+    // 2f: Esperar a que form_abm exista (ui-hidden-container → no visible para PW)
+    await page.waitForFunction(() => !!document.getElementById('form_abm'), { timeout: 15000 });
+    await page.waitForTimeout(1000);
+    this.logger.log('Formulario con tabs cargado');
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
-  // PASO 3: FILL OCA/EICI (Tab 0)
+  // PASO 3: FILL OCA/EICI — PF('oca'), sin activar pestaña
   // ═══════════════════════════════════════════════════════════════════════════
 
   private async fillOcaEici(page: Page, eiciId: string): Promise<void> {
-    await this.pfSelect(page, 'oca', eiciId);
+    await page.evaluate((eici) => {
+      (window as any).PF('oca').selectValue(eici);
+      (window as any).PF('oca').triggerChange();
+    }, eiciId);
     await page.waitForTimeout(500);
     this.logger.log('EICI seleccionada');
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
   // PASO 4: FILL EMPLAZAMIENTO (Tab 1)
+  //   PF widgets para selects/inputs SIN activar pestaña.
+  //   Activar tab 1 SOLO para RECONO vía (panel visible).
   // ═══════════════════════════════════════════════════════════════════════════
 
   private async fillEmplazamiento(
     page: Page,
     data: PortalSolicitudData,
-    expedienteId: string,
     resolvedInputs?: Record<string, { value: string; label: string }>,
   ): Promise<void> {
-    // Click on Emplazamiento tab
-    await this.clickTab(page, 1);
-    await page.waitForTimeout(500);
-
     const e = data.emplazamiento;
 
-    // Provincia → wait → Población → wait → Tipo Vía → wait
-    await this.pfSelect(page, 'provincia', e.provincia);
-    await page.waitForTimeout(1500); // AJAX carga poblaciones
+    // Provincia → esperar carga poblaciones
+    await page.evaluate((val) => {
+      (window as any).PF('provincia').selectValue(val);
+      (window as any).PF('provincia').triggerChange();
+    }, e.provincia);
+    await page.waitForTimeout(1500);
 
-    await this.pfSelect(page, 'poblacion', e.poblacion);
+    // Población
+    await page.evaluate((val) => {
+      (window as any).PF('poblacion').selectValue(val);
+      (window as any).PF('poblacion').triggerChange();
+    }, e.poblacion);
     await page.waitForTimeout(500);
 
-    await this.pfSelect(page, 'tipoVia', e.tipoVia);
+    // Tipo Vía
+    await page.evaluate((val) => {
+      (window as any).PF('tipoVia').selectValue(val);
+      (window as any).PF('tipoVia').triggerChange();
+    }, e.tipoVia);
     await page.waitForTimeout(500);
+
+    // Inputs directos via PF widgets (sin activar pestaña)
+    await page.evaluate((data) => {
+      const PF = (window as any).PF;
+      if (data.numero) PF('numero').jq.val(data.numero);
+      if (data.portal) PF('portal').jq.val(data.portal);
+      if (data.escalera) PF('escalera').jq.val(data.escalera);
+      if (data.piso) PF('piso').jq.val(data.piso);
+      if (data.puerta) PF('puerta').jq.val(data.puerta);
+      if (data.codigoPostal) PF('codigoPostal').jq.val(data.codigoPostal);
+      if (data.descripcion) PF('descripcion').jq.val(data.descripcion);
+    }, e);
+
+    // Activar tab 1 para RECONO vía (panel visible)
+    await this.activateTab(page, '1');
 
     // Vía — RECONO autocomplete
     const viaResolved = resolvedInputs?.['via'];
-    await this.resolveReconoVia(page, 'via', e.via, viaResolved?.value, 'FILL_EMPLAZAMIENTO');
-
-    // Inputs de dirección
-    await this.pfInput(page, 'numero', e.numero);
-    if (e.portal) await this.pfInput(page, 'portal', e.portal);
-    if (e.escalera) await this.pfInput(page, 'escalera', e.escalera);
-    if (e.piso) await this.pfInput(page, 'piso', e.piso);
-    if (e.puerta) await this.pfInput(page, 'puerta', e.puerta);
-    await this.pfInput(page, 'codigoPostal', e.codigoPostal);
+    await this.resolveReconoVia(
+      page,
+      'form_abm:tabs:via_tab1',
+      e.via,
+      viaResolved?.value,
+      'FILL_EMPLAZAMIENTO',
+      'via',
+    );
 
     this.logger.log('Emplazamiento rellenado');
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
   // PASO 5: FILL TITULAR (Tab 8)
+  //   PF widgets para selects SIN activar pestaña.
+  //   Activar tab 8 para NIF autocomplete y RECONO vía titular.
   // ═══════════════════════════════════════════════════════════════════════════
 
   private async fillTitular(
     page: Page,
     data: PortalSolicitudData,
-    expedienteId: string,
     resolvedInputs?: Record<string, { value: string; label: string }>,
   ): Promise<void> {
-    await this.clickTab(page, 8);
-    await page.waitForTimeout(500);
-
     const t = data.titular;
 
-    // Tipo documento
-    await this.pfSelect(page, 'tipoDocumentoTITULAR_8', t.tipoDocumento);
+    // Tipo documento (PF select, sin activar pestaña)
+    await page.evaluate((val) => {
+      (window as any).PF('tipoDocumentoTITULAR_8').selectValue(val);
+      (window as any).PF('tipoDocumentoTITULAR_8').triggerChange();
+    }, t.tipoDocumento);
+    await page.waitForTimeout(500);
+
+    // Activar tab 8 para NIF autocomplete
+    await this.activateTab(page, '8');
+
+    // NIF — escribir en input con selector de atributo exacto
+    const nifInput = '[id="form_abm:tabs:numeroDocumentoTITULAR_8_tab8_input"]';
+    await page.fill(nifInput, '');
+    await page.type(nifInput, t.numeroDocumento, { delay: 50 });
+    await page.waitForTimeout(1500); // esperar RECONO NIF lookup
+
+    // Si aparecen sugerencias, cerrarlas
+    await page.keyboard.press('Escape');
     await page.waitForTimeout(300);
 
-    // NIF — autocomplete (RECONO lookup by NIF)
-    await this.pfAutoType(page, 'numeroDocumentoTITULAR_8', t.numeroDocumento);
-    await page.waitForTimeout(1500); // Wait for RECONO NIF lookup
-
-    // Check if razonSocial was auto-filled by RECONO
-    const autoFilled = await page.evaluate(() => {
-      const el = document.querySelector('[id$="razonSocialTITULAR_8"]') as HTMLInputElement;
-      return el?.value || '';
-    });
-
-    if (!autoFilled && t.razonSocial) {
-      // Manual fill razón social
-      await page.evaluate(
-        ({ val }) => {
-          const el = document.querySelector('[id$="razonSocialTITULAR_8"]') as HTMLInputElement;
-          if (el) { el.value = val; el.dispatchEvent(new Event('change')); }
-        },
-        { val: t.razonSocial },
-      );
+    // Razón social (puede haberse auto-rellenado tras NIF)
+    if (t.razonSocial) {
+      await page.evaluate((val) => {
+        const el = document.getElementById('form_abm:tabs:razonSocialTITULAR_8_tab8');
+        if (el && !(el as HTMLInputElement).disabled && !(el as HTMLInputElement).value) {
+          (el as HTMLInputElement).value = val;
+        }
+      }, t.razonSocial);
     }
 
-    // Dirección titular
+    // Dirección titular (PF selects, sin activar pestaña)
     if (t.provincia) {
-      await this.pfSelect(page, 'provinciaTITULAR_8', t.provincia);
+      await page.evaluate((val) => {
+        (window as any).PF('provinciaTITULAR_8').selectValue(val);
+        (window as any).PF('provinciaTITULAR_8').triggerChange();
+      }, t.provincia);
       await page.waitForTimeout(1500);
     }
     if (t.poblacion) {
-      await this.pfSelect(page, 'poblacionTITULAR_8', t.poblacion);
+      await page.evaluate((val) => {
+        (window as any).PF('poblacionTITULAR_8').selectValue(val);
+        (window as any).PF('poblacionTITULAR_8').triggerChange();
+      }, t.poblacion);
       await page.waitForTimeout(500);
     }
     if (t.tipoVia) {
-      await this.pfSelect(page, 'tipoViaTITULAR_8', t.tipoVia);
+      await page.evaluate((val) => {
+        (window as any).PF('tipoViaTITULAR_8').selectValue(val);
+        (window as any).PF('tipoViaTITULAR_8').triggerChange();
+      }, t.tipoVia);
       await page.waitForTimeout(500);
     }
+
+    // Vía titular — RECONO autocomplete (tab 8 ya activa)
     if (t.via) {
       const viaTitResolved = resolvedInputs?.['viaTitular'];
       await this.resolveReconoVia(
-        page, 'viaTITULAR_8', t.via, viaTitResolved?.value, 'FILL_TITULAR',
+        page,
+        'form_abm:tabs:viaTITULAR_8_tab8',
+        t.via,
+        viaTitResolved?.value,
+        'FILL_TITULAR',
+        'viaTitular',
       );
     }
 
-    // Inputs dirección titular
-    if (t.numero) await this.pfInputBySelector(page, '[id$="numeroTITULAR_8"]', t.numero);
-    if (t.portal) await this.pfInputBySelector(page, '[id$="portalTITULAR_8"]', t.portal);
-    if (t.escalera) await this.pfInputBySelector(page, '[id$="escaleraTITULAR_8"]', t.escalera);
-    if (t.piso) await this.pfInputBySelector(page, '[id$="pisoTITULAR_8"]', t.piso);
-    if (t.puerta) await this.pfInputBySelector(page, '[id$="puertaTITULAR_8"]', t.puerta);
-    if (t.codigoPostal) await this.pfInputBySelector(page, '[id$="codigoPostalTITULAR_8"]', t.codigoPostal);
-
-    // Contacto
-    await this.pfInputBySelector(page, '[id$="telefonoTITULAR_8"]', t.telefono);
-    if (t.telefonoMovil) await this.pfInputBySelector(page, '[id$="telefonoMovilTITULAR_8"]', t.telefonoMovil);
-    if (t.email) await this.pfInputBySelector(page, '[id$="emailTITULAR_8"]', t.email);
+    // Inputs dirección titular via PF widgets
+    await page.evaluate((data) => {
+      const PF = (window as any).PF;
+      if (data.numero) PF('numeroTITULAR_8').jq.val(data.numero);
+      if (data.portal) PF('portalTITULAR_8').jq.val(data.portal);
+      if (data.escalera) PF('escaleraTITULAR_8').jq.val(data.escalera);
+      if (data.piso) PF('pisoTITULAR_8').jq.val(data.piso);
+      if (data.puerta) PF('puertaTITULAR_8').jq.val(data.puerta);
+      if (data.codigoPostal) PF('codigoPostalTITULAR_8').jq.val(data.codigoPostal);
+      if (data.telefono) PF('telefonoTITULAR_8').jq.val(data.telefono);
+      if (data.telefonoMovil) PF('telefonoMovilTITULAR_8').jq.val(data.telefonoMovil);
+      if (data.email) PF('emailTITULAR_8').jq.val(data.email);
+    }, t);
 
     this.logger.log('Titular rellenado');
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
-  // PASO 6: FILL DATOS TÉCNICOS (Tab 3)
+  // PASO 6: FILL DATOS TÉCNICOS (Tab 3 — todo via PF widgets, sin activar pestaña)
   // ═══════════════════════════════════════════════════════════════════════════
 
   private async fillDatosTecnicos(page: Page, data: PortalSolicitudData): Promise<void> {
-    await this.clickTab(page, 3);
-    await page.waitForTimeout(500);
-
     const dt = data.datosTecnicos;
 
-    await this.pfSelect(page, 'tipoSuministro', dt.tipoSuministro);
-    await page.waitForTimeout(300);
+    await page.evaluate((data) => {
+      const PF = (window as any).PF;
 
-    await this.pfSelect(page, 'tensionSuministro', dt.tensionSuministro);
-    await page.waitForTimeout(300);
+      // Selects con triggerChange
+      if (data.tipoSuministro) {
+        PF('tipoSuministro').selectValue(data.tipoSuministro);
+        PF('tipoSuministro').triggerChange();
+      }
+      if (data.tensionSuministro) {
+        PF('tensionSuministro').selectValue(data.tensionSuministro);
+        PF('tensionSuministro').triggerChange();
+      }
+      if (data.companiaDistribuidora) {
+        PF('companiaDistribuidora').selectValue(data.companiaDistribuidora);
+        PF('companiaDistribuidora').triggerChange();
+      }
+      if (data.sistemaConexion) {
+        PF('sistemaConexion').selectValue(data.sistemaConexion);
+        PF('sistemaConexion').triggerChange();
+      }
 
-    if (dt.companiaDistribuidora) {
-      await this.pfSelect(page, 'companiaDistribuidora', dt.companiaDistribuidora);
-      await page.waitForTimeout(300);
-    }
-
-    if (dt.sistemaConexion) {
-      await this.pfSelect(page, 'sistemaConexion', dt.sistemaConexion);
-      await page.waitForTimeout(300);
-    }
-
-    await this.pfInput(page, 'potenciaMaximaAdmisible', dt.potenciaMaximaAdmisible);
-    await this.pfInput(page, 'valorInterruptorGral', dt.valorInterruptorGral);
-
-    if (dt.cups) await this.pfInput(page, 'cups', dt.cups);
-    if (dt.seccionAcometida) await this.pfInput(page, 'seccionAcometida', dt.seccionAcometida);
-
-    // Checkboxes
-    if (dt.instalacionAislada) await this.pfCheckbox(page, 'instalacionAislada', true);
-    if (dt.viviendaUnifamiliar) await this.pfCheckbox(page, 'viviendaUnifamiliar', true);
+      // Inputs directos
+      if (data.potenciaMaximaAdmisible) PF('potenciaMaximaAdmisible').jq.val(data.potenciaMaximaAdmisible);
+      if (data.valorInterruptorGral) PF('valorInterruptorGral').jq.val(data.valorInterruptorGral);
+      if (data.cups) PF('cups').jq.val(data.cups);
+      if (data.seccionAcometida) PF('seccionAcometida').jq.val(data.seccionAcometida);
+      if (data.descripcionInstalacion) PF('descripcionInstalacion').jq.val(data.descripcionInstalacion);
+    }, dt);
+    await page.waitForTimeout(500);
 
     this.logger.log('Datos técnicos rellenados');
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
-  // PASO 7: GUARDAR
+  // PASO 7: GUARDAR — ID verificado: form_abm:btnGuardar
   // ═══════════════════════════════════════════════════════════════════════════
 
   private async guardar(page: Page): Promise<void> {
-    const guardarBtn = page.locator(
-      'a:has-text("Guardar"), button:has-text("Guardar"), [id$="guardar"], [id*="save"]',
-    ).first();
+    await page.evaluate(() => {
+      const btn = document.getElementById('form_abm:btnGuardar');
+      if (btn) (btn as HTMLElement).click();
+    });
+    await page.waitForTimeout(5000); // el portal tarda en guardar
 
-    await guardarBtn.click();
-    await page.waitForTimeout(3000);
-
-    // Wait for success indicator or page reload
+    // Check for validation errors
     const hasError = await page.locator('.ui-messages-error, .ui-message-error').isVisible().catch(() => false);
     if (hasError) {
       const errorText = await page.locator('.ui-messages-error, .ui-message-error').textContent().catch(() => '');
@@ -404,17 +483,17 @@ export class TramitacionPlaywrightService {
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
-  // PASO 8: SUBIR DOCUMENTOS (Tab 4)
+  // PASO 8: SUBIR DOCUMENTOS (Tab 4 — necesita inputs visibles, activar pestaña)
   // ═══════════════════════════════════════════════════════════════════════════
 
   private async subirDocumentos(
     page: Page,
     docs: PortalSolicitudData['documentos'],
   ): Promise<void> {
-    await this.clickTab(page, 4);
+    // Activar tab 4
+    await this.activateTab(page, '4');
     await page.waitForTimeout(1000);
 
-    // Upload each document
     const files = [
       { path: docs.ciePdf, label: 'CIE' },
       { path: docs.mtdPdf, label: 'MTD' },
@@ -425,12 +504,10 @@ export class TramitacionPlaywrightService {
     }
 
     for (const file of files) {
-      // Find file input (PrimeFaces fileUpload component)
       const fileInputs = page.locator('input[type="file"]');
       const count = await fileInputs.count();
 
       if (count > 0) {
-        // Use the first available file input
         await fileInputs.first().setInputFiles(file.path);
         await page.waitForTimeout(2000);
 
@@ -454,16 +531,15 @@ export class TramitacionPlaywrightService {
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
-  // PASO 9: ENVIAR
+  // PASO 9: ENVIAR — ID verificado: form_abm:btnEnviar
   // ═══════════════════════════════════════════════════════════════════════════
 
   private async enviar(page: Page): Promise<void> {
-    const enviarBtn = page.locator(
-      'a:has-text("Enviar"), button:has-text("Enviar"), [id$="enviar"], [id*="send"]',
-    ).first();
-
-    await enviarBtn.click();
-    await page.waitForTimeout(3000);
+    await page.evaluate(() => {
+      const btn = document.getElementById('form_abm:btnEnviar');
+      if (btn) (btn as HTMLElement).click();
+    });
+    await page.waitForTimeout(5000);
 
     // Handle confirmation dialog if present
     const confirmBtn = page.locator(
@@ -479,18 +555,15 @@ export class TramitacionPlaywrightService {
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
-  // PASO 10: VERIFICAR
+  // PASO 10: VERIFICAR — ID verificado: form_abm:tabs:numeroExpediente1_tab0
   // ═══════════════════════════════════════════════════════════════════════════
 
   private async verificar(page: Page): Promise<string | undefined> {
     await page.waitForTimeout(2000);
 
-    // Try to find the expediente number on the page
     const expedienteNum = await page.evaluate(() => {
-      // Look for text patterns like "BT-2026-XXXX" or "Nº Expediente: XXX"
-      const body = document.body.innerText;
-      const match = body.match(/(?:BT-\d{4}-\d+|N[ºo]\s*(?:Expediente|expediente)[:\s]*(\S+))/);
-      return match?.[0] || match?.[1] || undefined;
+      const el = document.getElementById('form_abm:tabs:numeroExpediente1_tab0');
+      return el ? (el as HTMLInputElement).value || undefined : undefined;
     });
 
     if (expedienteNum) {
@@ -504,213 +577,120 @@ export class TramitacionPlaywrightService {
 
   // ═══════════════════════════════════════════════════════════════════════════
   // RECONO — Resolución de vías por autocomplete
+  //   Usa selectores CSS con IDs exactos del DOM:
+  //     input: [id="${widgetPrefix}_input"]
+  //     panel: document.getElementById("${widgetPrefix}_panel")
+  //     hidden: document.getElementById("${widgetPrefix}_hinput")
   // ═══════════════════════════════════════════════════════════════════════════
 
   private async resolveReconoVia(
     page: Page,
-    widget: string,
+    widgetPrefix: string,
     viaName: string,
-    preSelectedUuid?: string,
-    step?: PlaywrightStep,
+    preSelectedUuid: string | undefined,
+    step: PlaywrightStep,
+    fieldName: string,
   ): Promise<void> {
-    const inputSelector = `input[id$="${widget}_input"]`;
+    const inputId = widgetPrefix + '_input';
+    const panelId = widgetPrefix + '_panel';
+    const hiddenId = widgetPrefix + '_hinput';
 
-    // If user already resolved (NEEDS_INPUT flow)
+    // Pre-selected UUID (NEEDS_INPUT resolution)
     if (preSelectedUuid) {
-      await page.fill(inputSelector, '');
-      await page.type(inputSelector, viaName.substring(0, 5), { delay: 80 });
-      await page.waitForTimeout(1500);
-
-      // Find and click the matching item by UUID
-      const clicked = await page.evaluate(
-        ({ w, uuid }) => {
-          const panel = document.querySelector(`[id$="${w}_panel"]`);
-          if (!panel) return false;
-          const items = panel.querySelectorAll('li');
-          for (const li of items) {
-            if (li.getAttribute('data-item-value') === uuid) {
-              (li as HTMLElement).click();
-              return true;
-            }
-          }
-          return false;
-        },
-        { w: widget, uuid: preSelectedUuid },
-      );
-
-      if (clicked) {
-        await page.waitForTimeout(500);
-        return;
-      }
-      // Fallback: set hidden input directly
-      await page.evaluate(
-        ({ w, uuid }) => {
-          const hidden = document.querySelector(`input[id$="${w}_hinput"]`) as HTMLInputElement;
-          if (hidden) hidden.value = uuid;
-        },
-        { w: widget, uuid: preSelectedUuid },
-      );
+      await page.evaluate(({ hid, uuid }) => {
+        const hidden = document.getElementById(hid);
+        if (hidden) (hidden as HTMLInputElement).value = uuid;
+      }, { hid: hiddenId, uuid: preSelectedUuid });
       return;
     }
 
-    // Normal flow: type and search
-    const searchTerm = viaName.substring(0, Math.min(5, viaName.length));
+    // 1. Escribir primeras letras en el autocomplete
+    const searchTerm = viaName.substring(0, 5).toUpperCase();
+    const inputSelector = `[id="${inputId}"]`;
+
     await page.fill(inputSelector, '');
-    await page.type(inputSelector, searchTerm, { delay: 80 });
+    await page.type(inputSelector, searchTerm, { delay: 100 });
     await page.waitForTimeout(1500);
 
-    // Read suggestions
-    const candidates = await page.evaluate((w) => {
-      const panel = document.querySelector(`[id$="${w}_panel"]`);
+    // 2. Leer sugerencias del panel
+    let candidates = await page.evaluate((pid) => {
+      const panel = document.getElementById(pid);
       if (!panel) return [];
-      return Array.from(panel.querySelectorAll('li')).map((li) => ({
+      return Array.from(panel.querySelectorAll('li')).map(li => ({
         uuid: li.getAttribute('data-item-value') || '',
         label: li.textContent?.trim() || '',
       }));
-    }, widget);
+    }, panelId);
 
-    if (candidates.length === 0) {
-      // Retry with fewer letters
-      await page.fill(inputSelector, '');
-      await page.type(inputSelector, viaName.substring(0, 3), { delay: 80 });
-      await page.waitForTimeout(1500);
-
-      const retry = await page.evaluate((w) => {
-        const panel = document.querySelector(`[id$="${w}_panel"]`);
-        if (!panel) return [];
-        return Array.from(panel.querySelectorAll('li')).map((li) => ({
-          uuid: li.getAttribute('data-item-value') || '',
-          label: li.textContent?.trim() || '',
-        }));
-      }, widget);
-
-      if (retry.length > 0) {
-        throw new NeedsInputError(
-          widget === 'via' ? 'via' : 'viaTitular',
-          retry.slice(0, 15).map((c) => ({ ...c, confidence: 50 })),
-          (step ?? 'FILL_EMPLAZAMIENTO') as PlaywrightStep,
-        );
-      }
-      throw new Error(`No se encontró la vía "${viaName}" en RECONO`);
-    }
-
-    // Fuzzy match
+    // 3. Fuzzy match
     const normalizedSearch = normalizeViaName(viaName);
-    const scored = candidates.map((c) => ({
+    let scored = candidates.map((c) => ({
       ...c,
       confidence: calculateMatchScore(normalizedSearch, normalizeViaName(c.label)),
     }));
     scored.sort((a, b) => b.confidence - a.confidence);
 
-    if (scored[0]!.confidence >= 80) {
-      // Auto-select best match
+    // 4. Decidir
+    if (scored.length > 0 && scored[0]!.confidence >= 80) {
+      // Match automático — click en el item del panel
       const bestUuid = scored[0]!.uuid;
-      await page.evaluate(
-        ({ w, uuid }) => {
-          const panel = document.querySelector(`[id$="${w}_panel"]`);
-          if (!panel) return;
-          const items = panel.querySelectorAll('li');
-          for (const li of items) {
-            if (li.getAttribute('data-item-value') === uuid) {
-              (li as HTMLElement).click();
-              return;
-            }
+      await page.evaluate(({ pid, uuid }) => {
+        const panel = document.getElementById(pid);
+        if (!panel) return;
+        const items = panel.querySelectorAll('li');
+        for (const item of items) {
+          if (item.getAttribute('data-item-value') === uuid) {
+            (item as HTMLElement).click();
+            return;
           }
-        },
-        { w: widget, uuid: bestUuid },
-      );
+        }
+      }, { pid: panelId, uuid: bestUuid });
       await page.waitForTimeout(500);
       this.logger.log(`RECONO auto-match: "${scored[0]!.label}" (${scored[0]!.confidence}%)`);
+    } else if (scored.length > 0) {
+      // Sin match claro — NEEDS_INPUT
+      throw new NeedsInputError(fieldName, scored.slice(0, 10), step);
     } else {
-      // Need user input
-      throw new NeedsInputError(
-        widget === 'via' ? 'via' : 'viaTitular',
-        scored.slice(0, 10),
-        (step ?? 'FILL_EMPLAZAMIENTO') as PlaywrightStep,
-      );
+      // Sin resultados — reintentar con menos letras
+      await page.fill(inputSelector, '');
+      await page.type(inputSelector, viaName.substring(0, 3).toUpperCase(), { delay: 100 });
+      await page.waitForTimeout(1500);
+
+      candidates = await page.evaluate((pid) => {
+        const panel = document.getElementById(pid);
+        if (!panel) return [];
+        return Array.from(panel.querySelectorAll('li')).map(li => ({
+          uuid: li.getAttribute('data-item-value') || '',
+          label: li.textContent?.trim() || '',
+        }));
+      }, panelId);
+
+      if (candidates.length > 0) {
+        throw new NeedsInputError(
+          fieldName,
+          candidates.slice(0, 15).map((c) => ({ ...c, confidence: 50 })),
+          step,
+        );
+      }
+      throw new Error(`No se encontró la vía "${viaName}" en RECONO`);
     }
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
-  // HELPERS — PrimeFaces API
+  // HELPERS
   // ═══════════════════════════════════════════════════════════════════════════
 
-  private async pfSelect(page: Page, widget: string, value: string): Promise<void> {
-    await page.evaluate(
-      ({ w, v }) => {
-        const pf = (window as any).PF;
-        if (!pf) throw new Error('PrimeFaces not loaded');
-        const wgt = pf(w);
-        if (!wgt) throw new Error(`Widget "${w}" not found`);
-        wgt.selectValue(v);
-        if (typeof wgt.triggerChange === 'function') wgt.triggerChange();
-      },
-      { w: widget, v: value },
-    );
-  }
-
-  private async pfInput(page: Page, widget: string, value: string): Promise<void> {
-    if (!value) return;
-    await page.evaluate(
-      ({ w, v }) => {
-        const pf = (window as any).PF;
-        if (!pf) return;
-        const wgt = pf(w);
-        if (wgt?.jq) {
-          wgt.jq.val(v);
-          wgt.jq.trigger('change');
-        }
-      },
-      { w: widget, v: value },
-    );
-  }
-
-  private async pfInputBySelector(page: Page, selector: string, value: string): Promise<void> {
-    if (!value) return;
-    await page.evaluate(
-      ({ sel, val }) => {
-        const el = document.querySelector(sel) as HTMLInputElement;
-        if (el) {
-          el.value = val;
-          el.dispatchEvent(new Event('change', { bubbles: true }));
-        }
-      },
-      { sel: selector, val: value },
-    );
-  }
-
-  private async pfAutoType(page: Page, widget: string, value: string): Promise<void> {
-    const inputSelector = `input[id$="${widget}_input"]`;
-    await page.fill(inputSelector, '');
-    await page.type(inputSelector, value, { delay: 50 });
-    await page.waitForTimeout(500);
-    // Trigger change for AJAX lookup
-    await page.evaluate((sel) => {
-      const el = document.querySelector(sel) as HTMLInputElement;
-      if (el) el.dispatchEvent(new Event('change', { bubbles: true }));
-    }, inputSelector);
-  }
-
-  private async pfCheckbox(page: Page, widget: string, checked: boolean): Promise<void> {
-    await page.evaluate(
-      ({ w, c }) => {
-        const pf = (window as any).PF;
-        if (!pf) return;
-        const wgt = pf(w);
-        if (!wgt) return;
-        const isChecked = wgt.isChecked?.() || wgt.jq?.find('.ui-chkbox-icon').hasClass('ui-icon-check');
-        if (c && !isChecked) wgt.toggle?.() || wgt.check?.();
-        if (!c && isChecked) wgt.toggle?.() || wgt.uncheck?.();
-      },
-      { w: widget, c: checked },
-    );
-  }
-
-  private async clickTab(page: Page, tabIndex: number): Promise<void> {
-    await page.evaluate((idx) => {
-      const tabs = document.querySelectorAll('.ui-tabs-nav li a, [role="tab"] a');
-      if (tabs[idx]) (tabs[idx] as HTMLElement).click();
-    }, tabIndex);
+  /**
+   * Activar pestaña del formulario por su ID (0, 1, 3, 4, 8, etc.).
+   * Dentro de page.evaluate NO escapar ":" — es JS nativo, no CSS de Playwright.
+   */
+  private async activateTab(page: Page, tabId: string): Promise<void> {
+    await page.evaluate((id) => {
+      const link = document.querySelector(
+        `a[href="#form_abm:tabs:tabView_id_${id}"]`,
+      ) as HTMLElement;
+      if (link) link.click();
+    }, tabId);
     await page.waitForTimeout(500);
   }
 
