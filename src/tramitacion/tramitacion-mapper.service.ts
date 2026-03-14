@@ -3,6 +3,11 @@ import {
   TIPO_DOCUMENTO,
   TIPO_SUMINISTRO,
   TENSION_SUMINISTRO,
+  SISTEMA_CONEXION,
+  DISTRIBUIDORA_MAP,
+  SUBTIPO_SUFFIX,
+  EXPEDIENTE_MAP,
+  TIPO_MODIFICACION,
   PROVINCIA,
   POBLACIONES_MADRID,
   TIPO_VIA,
@@ -19,16 +24,21 @@ export class TramitacionMapperService {
 
   /**
    * Mapea una instalación CIE completa al objeto PortalSolicitudData.
-   * Los campos de selects ya deben contener los códigos del portal
-   * (gracias a la sincronización de selects del frontend).
    */
   mapInstallation(
     installation: any,
     eiciId: string,
+    eiciName: string,
     documentPaths: { ciePdf: string; mtdPdf: string; solicitudBtPdf: string; unifilarPdf?: string },
   ): PortalSolicitudData {
+    const tipoExpediente = this.mapTipoExpediente(installation);
+
     return {
       ocaEici: eiciId,
+      ocaEiciName: eiciName,
+      tipoExpediente,
+      subtipoSolicitud: this.mapSubtipoSolicitud(installation),
+      tipoDocumentacion: (installation.tipoDocumentacion ?? 'MTD').toUpperCase() === 'PROYECTO' ? 'PROYECTO' : 'MTD',
 
       emplazamiento: {
         provincia: installation.emplazProvincia ?? PROVINCIA.MADRID,
@@ -46,7 +56,9 @@ export class TramitacionMapperService {
       titular: {
         tipoDocumento: this.mapTipoDocumento(installation.holderDocType),
         numeroDocumento: installation.titularNif ?? '',
-        razonSocial: this.buildNombreTitular(installation),
+        nombre: installation.titularNombre ?? undefined,
+        apellido1: installation.titularApellido1 ?? undefined,
+        apellido2: installation.titularApellido2 ?? undefined,
         provincia: installation.titularProvincia ?? PROVINCIA.MADRID,
         poblacion: this.lookupPoblacion(installation.titularLocalidad),
         tipoVia: this.lookupTipoVia(installation.titularTipoVia),
@@ -68,13 +80,14 @@ export class TramitacionMapperService {
         tipoSuministro: this.mapTipoSuministro(installation),
         tensionSuministro: this.mapTension(installation),
         cups: installation.cups ?? undefined,
-        companiaDistribuidora: installation.distribuidora ?? undefined,
-        sistemaConexion: installation.esquemaDistribucion ?? undefined,
+        companiaDistribuidora: this.mapDistribuidora(installation.distribuidora),
+        sistemaConexion: this.mapSistemaConexion(installation.esquemaDistribucion),
         seccionAcometida: installation.seccionAcometida
           ? String(installation.seccionAcometida)
           : undefined,
         instalacionAislada: false,
         viviendaUnifamiliar: false,
+        tipoModificacion: this.mapTipoModificacion(installation, tipoExpediente),
       },
 
       documentos: documentPaths,
@@ -84,9 +97,7 @@ export class TramitacionMapperService {
   private lookupPoblacion(localidad: string | null | undefined): string {
     if (!localidad) return '';
     const upper = localidad.toUpperCase().trim();
-    // Direct match
     if (POBLACIONES_MADRID[upper]) return POBLACIONES_MADRID[upper];
-    // Fuzzy: search by includes
     const entry = Object.entries(POBLACIONES_MADRID).find(([k]) =>
       k.includes(upper) || upper.includes(k),
     );
@@ -104,6 +115,10 @@ export class TramitacionMapperService {
     return fallback;
   }
 
+  /**
+   * Returns name string ('NIF', 'NIE', 'PASAPORTE') — portal UUIDs are dynamic per session,
+   * Playwright will search by name in the select options.
+   */
   private mapTipoDocumento(docType: string | null | undefined): string {
     switch (docType?.toUpperCase()) {
       case 'NIE':
@@ -115,8 +130,45 @@ export class TramitacionMapperService {
     }
   }
 
+  /**
+   * Extracts first 4-digit code from distribuidora string and maps to portal value.
+   * Our DB stores values like "0021 - I-DE Redes Eléctricas" or just "0021".
+   */
+  private mapDistribuidora(distribuidora: string | null | undefined): string | undefined {
+    if (!distribuidora) return undefined;
+    const code = distribuidora.trim().substring(0, 4);
+    const portalValue = DISTRIBUIDORA_MAP[code];
+    if (portalValue) {
+      this.logger.log(`Distribuidora "${code}" → portal "${portalValue}"`);
+      return portalValue;
+    }
+    this.logger.warn(`Distribuidora "${distribuidora}" (code="${code}") no tiene mapeo al portal`);
+    return undefined;
+  }
+
+  /**
+   * Maps raw esquemaDistribucion string (TT, TN-S, etc.) to portal numeric value.
+   */
+  private mapSistemaConexion(esquema: string | null | undefined): string | undefined {
+    if (!esquema) return undefined;
+    const upper = esquema.toUpperCase().trim().replace(/[\s-]+/g, '_');
+    const map: Record<string, string> = {
+      TT: SISTEMA_CONEXION.TT,
+      TN_S: SISTEMA_CONEXION.TN_S,
+      'TN-S': SISTEMA_CONEXION.TN_S,
+      TN_C: SISTEMA_CONEXION.TN_C,
+      'TN-C': SISTEMA_CONEXION.TN_C,
+      TN_C_S: SISTEMA_CONEXION.TN_C_S,
+      'TN-C-S': SISTEMA_CONEXION.TN_C_S,
+      IT: SISTEMA_CONEXION.IT,
+    };
+    const portalValue = map[esquema.trim()] ?? map[upper];
+    if (portalValue) return portalValue;
+    this.logger.warn(`Sistema conexión "${esquema}" no tiene mapeo al portal`);
+    return undefined;
+  }
+
   private mapTipoSuministro(installation: any): string {
-    // Panel voltage 400 → trifásico, else monofásico
     const voltage = installation.supplyVoltage;
     if (voltage === 400) return TIPO_SUMINISTRO.TRIFASICO;
     return TIPO_SUMINISTRO.MONOFASICO;
@@ -130,16 +182,92 @@ export class TramitacionMapperService {
 
   private formatPotencia(potKw: number | null | undefined): string {
     if (!potKw) return '';
-    // Portal expects kW with decimals (e.g. "5.750")
     return potKw.toFixed(3);
   }
 
-  private buildNombreTitular(installation: any): string {
-    const parts = [
-      installation.titularNombre,
-      installation.titularApellido1,
-      installation.titularApellido2,
-    ].filter(Boolean);
-    return parts.join(' ') || installation.titularName || '';
+  /**
+   * Maps expedienteType/tipoActuacion to portal value using direct EXPEDIENTE_MAP.
+   */
+  private mapTipoExpediente(installation: any): string {
+    const raw = (installation.expedienteType ?? installation.tipoActuacion ?? '')
+      .toUpperCase()
+      .trim()
+      .replace(/\s+/g, '_');
+
+    const mapped = EXPEDIENTE_MAP[raw];
+    if (mapped) return mapped;
+
+    // Fallback: check common partial matches
+    if (raw.includes('AMPLIACION') && raw.includes('CAMBIO')) return EXPEDIENTE_MAP['AMPLIACION_CAMBIO_TITULAR']!;
+    if (raw.includes('MODIFICACION') && raw.includes('CAMBIO')) return EXPEDIENTE_MAP['MODIFICACION_CAMBIO_TITULAR']!;
+    if (raw.includes('AMPLIACION')) return EXPEDIENTE_MAP['AMPLIACION']!;
+    if (raw.includes('MODIFICACION')) return EXPEDIENTE_MAP['MODIFICACION']!;
+
+    return EXPEDIENTE_MAP['NUEVA_INSTALACION']!;
+  }
+
+  /**
+   * Maps installationType/supplyType to the subtipo suffix for includes-based matching.
+   * Returns the suffix that will be matched via includes() against portal link text.
+   */
+  private mapSubtipoSolicitud(installation: any): string {
+    const instType = (installation.installationType ?? '').toLowerCase();
+    const supplyType = (installation.supplyType ?? '').toUpperCase();
+
+    switch (instType) {
+      case 'irve':
+        return SUBTIPO_SUFFIX['IRVE']!;
+      case 'autoconsumo':
+        return SUBTIPO_SUFFIX['AUTOCONSUMO']!;
+      case 'industrial':
+        return SUBTIPO_SUFFIX['INDUSTRIAL']!;
+      case 'local':
+        return SUBTIPO_SUFFIX['LOCAL_OFICINA']!;
+      case 'garaje':
+        return SUBTIPO_SUFFIX['GARAJES']!;
+      case 'generacion':
+        return SUBTIPO_SUFFIX['GENERACION']!;
+      case 'alumbrado':
+        return SUBTIPO_SUFFIX['ALUMBRADO_EXTERIOR']!;
+      case 'enlace':
+        return SUBTIPO_SUFFIX['ENLACE_COMUNES']!;
+    }
+
+    switch (supplyType) {
+      case 'IRVE':
+        return SUBTIPO_SUFFIX['IRVE']!;
+      case 'LOCAL_COMERCIAL':
+        return SUBTIPO_SUFFIX['LOCAL_OFICINA']!;
+    }
+
+    this.logger.log(
+      `Subtipo no determinado para installationType="${instType}", supplyType="${supplyType}" → default Vivienda`,
+    );
+    return SUBTIPO_SUFFIX['VIVIENDA']!;
+  }
+
+  /**
+   * Maps tipoModificacion for MODIFICACION* expedientes.
+   */
+  private mapTipoModificacion(installation: any, tipoExpediente: string): string | undefined {
+    // Only for modification expedientes (portal values 2, 11, 13)
+    if (!['2', '11', '13'].includes(tipoExpediente)) return undefined;
+
+    const raw = (installation.tipoModificacion ?? installation.tipoActuacion ?? '')
+      .toUpperCase()
+      .trim()
+      .replace(/[\s-]+/g, '_');
+
+    const map: Record<string, string> = {
+      CAMBIO_DI: TIPO_MODIFICACION.CAMBIO_DI,
+      CAMBIO_CGBT: TIPO_MODIFICACION.CAMBIO_CGBT,
+      SUSTITUCION_SUMINISTRO: TIPO_MODIFICACION.SUSTITUCION_SUMINISTRO,
+      REFORMA_INTEGRAL: TIPO_MODIFICACION.REFORMA_INTEGRAL,
+      INSTALACION_SINGULAR: TIPO_MODIFICACION.INSTALACION_SINGULAR,
+      AMPLIACION_MODIFICACION: TIPO_MODIFICACION.AMPLIACION_MODIFICACION,
+      OTRAS_MODIFICACIONES: TIPO_MODIFICACION.OTRAS_MODIFICACIONES,
+    };
+
+    return map[raw] ?? TIPO_MODIFICACION.OTRAS_MODIFICACIONES;
   }
 }

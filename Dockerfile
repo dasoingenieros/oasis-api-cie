@@ -19,6 +19,7 @@ RUN npm run build
 # ─── Runtime ─────────────────────────────────────────────────
 FROM node:20-slim
 
+# System deps: LibreOffice + Python + Chromium browser deps (all in one layer)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libreoffice-calc \
     libreoffice-writer \
@@ -29,12 +30,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     fonts-dejavu-core \
     ca-certificates \
     curl \
+    # Chromium system dependencies for Playwright
+    libnss3 libnspr4 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 \
+    libdbus-1-3 libxkbcommon0 libatspi2.0-0 libxcomposite1 libxdamage1 \
+    libxfixes3 libxrandr2 libgbm1 libpango-1.0-0 libcairo2 libasound2 \
+    libwayland-client0 \
     && pip3 install --break-system-packages python-docx \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
-
-# Playwright Chromium for portal automation (tramitación ASEICAM)
-RUN npx playwright install --with-deps chromium
 
 WORKDIR /app
 
@@ -47,6 +50,10 @@ COPY --from=builder /app/package.json ./
 # Copy non-TS assets (templates, Python scripts) that nest build may not copy
 COPY --from=builder /app/src/assets ./dist/src/assets
 COPY --from=builder /app/src/documents/templates ./dist/src/documents/templates
+
+# Install Playwright Chromium browsers AFTER node_modules are in place
+ENV PLAYWRIGHT_BROWSERS_PATH=/app/.cache/ms-playwright
+RUN npx playwright-core install chromium
 
 RUN groupadd -r appuser && useradd -r -g appuser -d /app appuser \
     && mkdir -p /app/tmp /app/.config && chown -R appuser:appuser /app

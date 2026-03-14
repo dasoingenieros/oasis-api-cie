@@ -11,10 +11,46 @@
 
 export const PORTAL_URLS = {
   login:
-    'https://app.elportaldelinstalador.com/aseicam/pdi/pages/seguridad/login.jsf',
+    'https://app.elportaldelinstalador.com/aseicam/pdi/pages/loginPortal.jsf',
   home: 'https://app.elportaldelinstalador.com/aseicam/pdi/pages/gestion/solicitud/listaSolicitud.jsf',
-  altaSolicitud:
+  altaSolicitud1:
+    'https://app.elportaldelinstalador.com/aseicam/pdi/pages/gestion/solicitud/altaSolicitud1.jsf',
+  altaSolicitud2:
     'https://app.elportaldelinstalador.com/aseicam/pdi/pages/gestion/solicitud/altaSolicitud2.jsf',
+} as const;
+
+// =============================================================================
+// Tipo expediente — valores del select PrimeFaces "tipoExpediente"
+// =============================================================================
+
+export const TIPO_EXPEDIENTE = {
+  NUEVA_INSTALACION: '1',
+  MODIFICACION: '2',
+  AMPLIACION: '4',
+  NUEVA_MULTI_INSTALACION: '5',
+  MODIFICACION_SIN_INSTALACION: '11',
+  AMPLIACION_SIN_INSTALACION: '12',
+  MODIFICACION_CAMBIO_TITULAR: '13',
+  AMPLIACION_CAMBIO_TITULAR: '14',
+} as const;
+
+// =============================================================================
+// Subtipos de solicitud — texto exacto de los links del portal
+// =============================================================================
+
+export const SUBTIPO_SOLICITUD = {
+  ALUMBRADO_EXTERIOR: 'Nueva Instalación Alumbrado Exterior',
+  AUTOCONSUMO: 'Nueva Instalación Autoconsumo',
+  ENLACE_COMUNES: 'Nueva Instalación Instalaciones de Enlace y Comunes',
+  INDUSTRIAL: 'Nueva Instalación Industrial',
+  GARAJES: 'Nueva Instalación Garajes (NO LPC)',
+  IRVE: 'Nueva Instalación Infraestructura de Recarga para Vehículos (IRVE)',
+  GENERACION: 'Nueva Instalación Generación',
+  LOCAL_OFICINA: 'Nueva Instalación Local/Oficina (NO LPC)',
+  LPC_ESPECTACULOS: 'Nueva Instalación LPC. Locales de Espectáculos y Actividades Recreativas',
+  LPC_REUNION: 'Nueva Instalación LPC. Locales de Reunión, Trabajo y Usos Sanitarios',
+  OTRAS: 'Nueva Instalación Otras',
+  VIVIENDA: 'Nueva Instalación Vivienda',
 } as const;
 
 export const FORM_PREFIX = 'form_abm:tabs:';
@@ -23,10 +59,11 @@ export const FORM_PREFIX = 'form_abm:tabs:';
 // Valores de selects — IDs internos del portal
 // =============================================================================
 
+// TIPO_DOCUMENTO: use name strings — UUIDs are dynamic per session, search by name instead
 export const TIPO_DOCUMENTO = {
-  NIF: 'f90d83c7-a4e0-4aec-8e71-e85bf0748482',
-  NIE: '3f21e642-c892-425d-bd60-8f5961029af9',
-  PASAPORTE: 'a0a5c6fc-2899-4983-b7c6-c7a4f6d7b25b',
+  NIF: 'NIF',
+  NIE: 'NIE',
+  PASAPORTE: 'PASAPORTE',
 } as const;
 
 export const TIPO_SUMINISTRO = {
@@ -58,13 +95,81 @@ export const COMPANIA_DISTRIBUIDORA = {
   VIESGO: '9109',
 } as const;
 
+// Portal expects numeric values, not raw strings
 export const SISTEMA_CONEXION = {
-  TT: 'TT',
-  TN_S: 'TN-S',
-  TN_C: 'TN-C',
-  TN_C_S: 'TN-C-S',
-  IT: 'IT',
+  TT: '9201',
+  TN_S: '9202',
+  TN_C: '9203',
+  TN_C_S: '9204',
+  IT: '9205',
 } as const;
+
+// =============================================================================
+// Distribuidora: código BD (4 dígitos) → valor portal
+// =============================================================================
+
+export const DISTRIBUIDORA_MAP: Record<string, string> = {
+  '0021': '9101', // I-DE Redes Eléctricas Inteligentes (Iberdrola)
+  '0022': '9102', // UFD Distribución Electricidad (Naturgy/Unión Fenosa)
+  '0026': '9103', // Hidrocantábrico
+  '0031': '9107', // E-Distribución Redes Digitales (Endesa)
+  '0483': '9104', // Tajuña
+  '0494': '9105', // Pozo Tío Raimundo
+  '0314': '9106', // Hidroeléctrica Vega (our DB stores 0314, portal uses 0315)
+  '0315': '9106', // Hidroeléctrica Vega (portal code)
+  '0148': '9108', // Las Mercedes
+  '0027': '9109', // Viesgo
+};
+
+// =============================================================================
+// Subtipo suffixes — for includes() matching (portal links vary by expediente type prefix)
+// =============================================================================
+
+export const SUBTIPO_SUFFIX: Record<string, string> = {
+  VIVIENDA: 'Vivienda',
+  AUTOCONSUMO: 'Autoconsumo',
+  IRVE: 'Infraestructura de Recarga',
+  INDUSTRIAL: 'Industrial',
+  LOCAL_OFICINA: 'Local/Oficina',
+  GARAJES: 'Garajes',
+  GENERACION: 'Generación',
+  ALUMBRADO_EXTERIOR: 'Alumbrado Exterior',
+  ENLACE_COMUNES: 'Enlace y Comunes',
+  LPC_ESPECTACULOS: 'Espectáculos y Actividades Recreativas',
+  LPC_REUNION: 'Reunión, Trabajo y Usos Sanitarios',
+  OTRAS: 'Otras',
+};
+
+// =============================================================================
+// Tipo modificación — valores portal (solo para expedientes MODIFICACION*)
+// =============================================================================
+
+export const TIPO_MODIFICACION = {
+  CAMBIO_DI: '9301',
+  CAMBIO_CGBT: '9302',
+  SUSTITUCION_SUMINISTRO: '9303',
+  REFORMA_INTEGRAL: '9304',
+  INSTALACION_SINGULAR: '9305',
+  AMPLIACION_MODIFICACION: '9306',
+  OTRAS_MODIFICACIONES: '9307',
+  NO_MODIFICACION: '9308',
+} as const;
+
+// =============================================================================
+// Expediente type: BD value → portal select value (clean direct mapping)
+// =============================================================================
+
+export const EXPEDIENTE_MAP: Record<string, string> = {
+  NUEVA_INSTALACION: '1',
+  NUEVA: '1',
+  MODIFICACION: '2',
+  AMPLIACION: '4',
+  NUEVA_MULTI_INSTALACION: '5',
+  MODIFICACION_SIN_INSTALACION: '11',
+  AMPLIACION_SIN_INSTALACION: '12',
+  MODIFICACION_CAMBIO_TITULAR: '13',
+  AMPLIACION_CAMBIO_TITULAR: '14',
+};
 
 export const PROVINCIA = {
   MADRID: '31',
@@ -220,8 +325,7 @@ export const POBLACIONES_MADRID: Record<string, string> = {
 // =============================================================================
 
 export const PF_WIDGETS = {
-  // Tab 0
-  oca: { type: 'SELECT' as const, ajax: true },
+  // Tab 0 — OCA/EICI: se deja por defecto (portal ya tiene la correcta preseleccionada)
   // Tab 1 — Emplazamiento
   provincia: { type: 'SELECT' as const, ajax: true, waitAfter: 1500 },
   poblacion: { type: 'SELECT' as const, ajax: true, waitAfter: 500 },
@@ -256,14 +360,10 @@ export const PF_WIDGETS = {
 export const PLAYWRIGHT_STEPS = [
   'LOGIN',
   'CREATE_SOLICITUD',
-  'FILL_OCA_EICI',
   'FILL_EMPLAZAMIENTO',
   'FILL_TITULAR',
   'FILL_DATOS_TECNICOS',
   'SAVE',
-  'UPLOAD_DOCUMENTS',
-  'SEND',
-  'VERIFY',
 ] as const;
 
 export type PlaywrightStep = (typeof PLAYWRIGHT_STEPS)[number];
@@ -274,6 +374,10 @@ export type PlaywrightStep = (typeof PLAYWRIGHT_STEPS)[number];
 
 export interface PortalSolicitudData {
   ocaEici: string;
+  ocaEiciName: string;
+  tipoExpediente: string;
+  subtipoSolicitud: string;
+  tipoDocumentacion: 'PROYECTO' | 'MTD';
   observaciones?: string;
 
   emplazamiento: {
@@ -293,7 +397,9 @@ export interface PortalSolicitudData {
   titular: {
     tipoDocumento: string;
     numeroDocumento: string;
-    razonSocial?: string;
+    nombre?: string;
+    apellido1?: string;
+    apellido2?: string;
     provincia?: string;
     poblacion?: string;
     tipoVia?: string;
@@ -321,6 +427,7 @@ export interface PortalSolicitudData {
     instalacionAislada?: boolean;
     viviendaUnifamiliar?: boolean;
     descripcionInstalacion?: string;
+    tipoModificacion?: string;
   };
 
   documentos: {

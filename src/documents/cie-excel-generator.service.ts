@@ -194,8 +194,10 @@ export class CieExcelGeneratorService {
 
   private applyTransform(transform: string, field: string, data: Record<string, any>): any {
     switch (transform) {
-      case 'tipoSuministro':
-        return data['supplyVoltage'] === 400 ? 'Trifásico' : 'Monofásico';
+      case 'tipoSuministro': {
+        const v = Number(data['supplyVoltage']);
+        return (v === 400 || v === 380) ? 'Trifásico' : 'Monofásico';
+      }
 
       case 'boolToSiNo':
         return data[field] ? 'SI' : 'NO';

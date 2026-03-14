@@ -268,7 +268,7 @@ export class PanelsService {
 
     // Determinar IGA según tipo de suministro
     const voltage = installation.supplyVoltage ?? 230;
-    const igaPoles = voltage === 400 ? 4 : 2;
+    const igaPoles = (voltage === 400 || voltage === 380) ? 4 : 2;
     let igaCalibreA: number;
 
     switch (installation.supplyType) {

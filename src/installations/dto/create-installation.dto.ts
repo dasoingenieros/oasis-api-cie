@@ -15,6 +15,7 @@ export class CreateInstallationDto {
   @IsString() @IsOptional() tipoDocumentacion?: string; // MTD | PROYECTO
 
   // ═══ TITULAR ═══════════════════════════════════════════════════
+  @IsString() @IsOptional() holderDocType?: string; // NIF, NIE, PASAPORTE
   @IsString() @IsOptional() titularNif?: string;
   @IsString() @IsOptional() titularNombre?: string;
   @IsString() @IsOptional() titularApellido1?: string;

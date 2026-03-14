@@ -128,7 +128,7 @@ export class CalculationsService {
 
     // ── Valores del usuario ────────────────────────────────
     const voltage = inst.supplyVoltage ?? 230;
-    const phaseSystem: 'single' | 'three' = voltage === 400 ? 'three' : 'single';
+    const phaseSystem: 'single' | 'three' = (voltage === 400 || voltage === 380) ? 'three' : 'single';
     const userIgaA = panel?.igaCalibreA ?? inst.igaNominal ?? 25;
     // P. Máx. Admisible: 1) datos-form, 2) derivada del IGA (V × calibre)
     const igaDerivedPowerKw = phaseSystem === 'three'

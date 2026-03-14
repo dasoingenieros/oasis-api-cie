@@ -14,6 +14,7 @@ export class NeedsInputError extends Error {
     public readonly field: string,
     public readonly candidates: ReconoCandidate[],
     public readonly step: PlaywrightStep,
+    public readonly searchTerm?: string,
   ) {
     super(`NEEDS_INPUT: campo "${field}" requiere selección manual`);
     this.name = 'NeedsInputError';
@@ -46,7 +47,7 @@ export class TramitacionPlaywrightService {
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
-  // FLUJO PRINCIPAL
+  // FLUJO PRINCIPAL — stops at SAVED state (no auto-send)
   // ═══════════════════════════════════════════════════════════════════════════
 
   async ejecutarTramitacion(
@@ -55,7 +56,7 @@ export class TramitacionPlaywrightService {
     expedienteId: string,
     onProgress: (step: PlaywrightStep, progress: number) => Promise<void>,
     resolvedInputs?: Record<string, { value: string; label: string }>,
-  ): Promise<{ portalExpediente?: string; screenshots: string[] }> {
+  ): Promise<{ screenshots: string[] }> {
     const screenshots: string[] = [];
     let browser: Browser | null = null;
 
@@ -79,10 +80,7 @@ export class TramitacionPlaywrightService {
       await this.crearSolicitud(page, data);
       await this.screenshot(page, expedienteId, 'CREATE_SOLICITUD', screenshots);
 
-      // Step 3: FILL_OCA_EICI
-      await onProgress('FILL_OCA_EICI', 15);
-      await this.fillOcaEici(page, data.ocaEici);
-      await this.screenshot(page, expedienteId, 'FILL_OCA_EICI', screenshots);
+      // Step 3: SKIP — OCA/EICI (Tab 0) se deja por defecto (portal ya tiene la correcta)
 
       // Step 4: FILL_EMPLAZAMIENTO
       await onProgress('FILL_EMPLAZAMIENTO', 25);
@@ -99,28 +97,13 @@ export class TramitacionPlaywrightService {
       await this.fillDatosTecnicos(page, data);
       await this.screenshot(page, expedienteId, 'FILL_DATOS_TECNICOS', screenshots);
 
-      // Step 7: SAVE
-      await onProgress('SAVE', 65);
+      // Step 7: SAVE — guardar y fin (estado SAVED)
+      await onProgress('SAVE', 90);
       await this.guardar(page);
       await this.screenshot(page, expedienteId, 'SAVE', screenshots);
 
-      // Step 8: UPLOAD_DOCUMENTS
-      await onProgress('UPLOAD_DOCUMENTS', 75);
-      await this.subirDocumentos(page, data.documentos);
-      await this.screenshot(page, expedienteId, 'UPLOAD_DOCUMENTS', screenshots);
-
-      // Step 9: SEND
-      await onProgress('SEND', 90);
-      await this.enviar(page);
-      await this.screenshot(page, expedienteId, 'SEND', screenshots);
-
-      // Step 10: VERIFY
-      await onProgress('VERIFY', 95);
-      const portalExpediente = await this.verificar(page);
-      await this.screenshot(page, expedienteId, 'VERIFY', screenshots);
-
       await context.close();
-      return { portalExpediente, screenshots };
+      return { screenshots };
     } finally {
       if (browser) {
         await browser.close().catch(() => {});
@@ -155,8 +138,7 @@ export class TramitacionPlaywrightService {
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
-  // PASO 1: LOGIN — Selectores verificados:
-  //   [id="form_login:username"], [id="form_login:password"], button[type="submit"]
+  // PASO 1: LOGIN
   // ═══════════════════════════════════════════════════════════════════════════
 
   private async login(
@@ -169,7 +151,6 @@ export class TramitacionPlaywrightService {
     await page.fill('[id="form_login:username"]', credentials.username);
     await page.fill('[id="form_login:password"]', credentials.password);
 
-    // PrimeFaces AJAX submit — NO navegación normal, redirige via JS
     await page.click('button[type="submit"]');
 
     try {
@@ -186,12 +167,11 @@ export class TramitacionPlaywrightService {
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
-  // PASO 2: CREAR SOLICITUD
-  //   Navegación directa + PF widgets + links por texto
+  // PASO 2: CREAR SOLICITUD — includes-based subtipo matching + PROYECTO/MTD button IDs
   // ═══════════════════════════════════════════════════════════════════════════
 
   private async crearSolicitud(page: Page, data: PortalSolicitudData): Promise<void> {
-    // 2a: Navegar directo a altaSolicitud1 (sin menú)
+    // 2a: Navigate to altaSolicitud1
     await page.goto(PORTAL_URLS.altaSolicitud1);
     await page.waitForLoadState('networkidle');
     this.logger.log('altaSolicitud1.jsf cargado');
@@ -215,57 +195,64 @@ export class TramitacionPlaywrightService {
     await page.waitForTimeout(2000);
     this.logger.log(`Tipo expediente seleccionado: ${tipoExp}`);
 
-    // 2d: Subtipo — buscar por texto exacto entre links a[id*="btnCampoActuacion"]
-    const subtipo = data.subtipoSolicitud;
+    // 2d: Subtipo — match by includes(suffix) instead of exact text
+    const suffix = data.subtipoSolicitud;
     const clicked = await page.evaluate((target) => {
       const links = document.querySelectorAll('a[id*="btnCampoActuacion"]');
       for (const link of links) {
-        if (link.textContent!.trim() === target) {
+        if (link.textContent!.trim().includes(target)) {
           (link as HTMLElement).click();
-          return true;
+          return link.textContent!.trim();
         }
       }
-      return false;
-    }, subtipo);
+      return null;
+    }, suffix);
 
     if (!clicked) {
-      throw new Error(`Subtipo "${subtipo}" no encontrado en el portal`);
+      throw new Error(`Subtipo con sufijo "${suffix}" no encontrado en el portal`);
     }
-    this.logger.log(`Subtipo seleccionado: ${subtipo}`);
+    this.logger.log(`Subtipo seleccionado: "${clicked}" (matched suffix "${suffix}")`);
     await page.waitForTimeout(3000);
 
-    // 2e: Puede haber paso MEMORIA/PROYECTO — para Vivienda es automático
-    const memoriaLink = page.locator('a:has-text("MEMORIA"), a:has-text("Memoria")').first();
-    const memoriaVisible = await memoriaLink.isVisible().catch(() => false);
-    if (memoriaVisible) {
-      await memoriaLink.click();
-      this.logger.log('Tipo documentación seleccionado: MEMORIA');
-      await page.waitForTimeout(2000);
+    // 2e: PROYECTO vs MTD — use exact button IDs
+    const tipoDoc = data.tipoDocumentacion;
+    if (tipoDoc === 'PROYECTO') {
+      // Button ID index 0 = PROYECTO
+      const btnId = 'form_altaSolicitud:lstVariantes:0:btnVarianteTipoSolicitud';
+      const proyectoClicked = await page.evaluate((id) => {
+        const btn = document.getElementById(id);
+        if (btn) { (btn as HTMLElement).click(); return true; }
+        return false;
+      }, btnId);
+      if (proyectoClicked) {
+        this.logger.log('Tipo documentación: PROYECTO');
+      } else {
+        this.logger.warn('Botón PROYECTO no encontrado, puede ser automático');
+      }
+    } else {
+      // Button ID index 1 = MEMORIA TÉCNICA DE DISEÑO (MTD)
+      const btnId = 'form_altaSolicitud:lstVariantes:1:btnVarianteTipoSolicitud';
+      const mtdClicked = await page.evaluate((id) => {
+        const btn = document.getElementById(id);
+        if (btn) { (btn as HTMLElement).click(); return true; }
+        return false;
+      }, btnId);
+      if (mtdClicked) {
+        this.logger.log('Tipo documentación: MTD');
+      } else {
+        this.logger.warn('Botón MTD no encontrado, puede ser automático');
+      }
     }
+    await page.waitForTimeout(2000);
 
-    // 2f: Esperar a que form_abm exista (ui-hidden-container → no visible para PW)
+    // 2f: Wait for form_abm
     await page.waitForFunction(() => !!document.getElementById('form_abm'), { timeout: 15000 });
     await page.waitForTimeout(1000);
     this.logger.log('Formulario con tabs cargado');
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
-  // PASO 3: FILL OCA/EICI — PF('oca'), sin activar pestaña
-  // ═══════════════════════════════════════════════════════════════════════════
-
-  private async fillOcaEici(page: Page, eiciId: string): Promise<void> {
-    await page.evaluate((eici) => {
-      (window as any).PF('oca').selectValue(eici);
-      (window as any).PF('oca').triggerChange();
-    }, eiciId);
-    await page.waitForTimeout(500);
-    this.logger.log('EICI seleccionada');
-  }
-
-  // ═══════════════════════════════════════════════════════════════════════════
   // PASO 4: FILL EMPLAZAMIENTO (Tab 1)
-  //   PF widgets para selects/inputs SIN activar pestaña.
-  //   Activar tab 1 SOLO para RECONO vía (panel visible).
   // ═══════════════════════════════════════════════════════════════════════════
 
   private async fillEmplazamiento(
@@ -275,28 +262,23 @@ export class TramitacionPlaywrightService {
   ): Promise<void> {
     const e = data.emplazamiento;
 
-    // Provincia → esperar carga poblaciones
-    await page.evaluate((val) => {
-      (window as any).PF('provincia').selectValue(val);
-      (window as any).PF('provincia').triggerChange();
-    }, e.provincia);
-    await page.waitForTimeout(1500);
+    // Provincia → wait for poblaciones to load (AJAX)
+    await this.pfSelectAndVerify(page, 'provincia', e.provincia, {
+      dependentWidget: 'poblacion',
+      minDependentOptions: 2,
+      waitMs: 2000,
+      retryWaitMs: 3000,
+    });
 
-    // Población
-    await page.evaluate((val) => {
-      (window as any).PF('poblacion').selectValue(val);
-      (window as any).PF('poblacion').triggerChange();
-    }, e.poblacion);
-    await page.waitForTimeout(500);
+    await this.pfSelectAndVerify(page, 'poblacion', e.poblacion, {
+      waitMs: 1000,
+    });
 
-    // Tipo Vía
-    await page.evaluate((val) => {
-      (window as any).PF('tipoVia').selectValue(val);
-      (window as any).PF('tipoVia').triggerChange();
-    }, e.tipoVia);
-    await page.waitForTimeout(500);
+    await this.pfSelectAndVerify(page, 'tipoVia', e.tipoVia, {
+      waitMs: 500,
+    });
 
-    // Inputs directos via PF widgets (sin activar pestaña)
+    // Direct inputs via PF widgets (no tab activation needed)
     await page.evaluate((data) => {
       const PF = (window as any).PF;
       if (data.numero) PF('numero').jq.val(data.numero);
@@ -308,16 +290,28 @@ export class TramitacionPlaywrightService {
       if (data.descripcion) PF('descripcion').jq.val(data.descripcion);
     }, e);
 
-    // Activar tab 1 para RECONO vía (panel visible)
+    // Pre-RECONO check
+    const pre = await page.evaluate(() => ({
+      prov: (window as any).PF('provincia').getSelectedValue(),
+      pob: (window as any).PF('poblacion').getSelectedValue(),
+      tv: (window as any).PF('tipoVia').getSelectedValue(),
+    }));
+    this.logger.log(`Pre-RECONO check: prov=${pre.prov}, pob=${pre.pob}, tv=${pre.tv}`);
+    if (!pre.prov || !pre.pob || !pre.tv) {
+      throw new Error(
+        `Provincia/Población/TipoVía no seteados antes de RECONO (prov=${pre.prov}, pob=${pre.pob}, tv=${pre.tv})`,
+      );
+    }
+
+    // Activate tab 1 for RECONO vía (panel must be visible)
     await this.activateTab(page, '1');
 
     // Vía — RECONO autocomplete
-    const viaResolved = resolvedInputs?.['via'];
     await this.resolveReconoVia(
       page,
       'form_abm:tabs:via_tab1',
       e.via,
-      viaResolved?.value,
+      resolvedInputs?.['via'],
       'FILL_EMPLAZAMIENTO',
       'via',
     );
@@ -327,8 +321,7 @@ export class TramitacionPlaywrightService {
 
   // ═══════════════════════════════════════════════════════════════════════════
   // PASO 5: FILL TITULAR (Tab 8)
-  //   PF widgets para selects SIN activar pestaña.
-  //   Activar tab 8 para NIF autocomplete y RECONO vía titular.
+  //   Fix: NIF via PF search, tipoDocumento by name, split name fields
   // ═══════════════════════════════════════════════════════════════════════════
 
   private async fillTitular(
@@ -338,73 +331,109 @@ export class TramitacionPlaywrightService {
   ): Promise<void> {
     const t = data.titular;
 
-    // Tipo documento (PF select, sin activar pestaña)
-    await page.evaluate((val) => {
-      (window as any).PF('tipoDocumentoTITULAR_8').selectValue(val);
-      (window as any).PF('tipoDocumentoTITULAR_8').triggerChange();
+    // Tipo documento — search by name in select options (UUIDs are dynamic)
+    await page.evaluate((docTypeName) => {
+      const select = document.getElementById('form_abm:tabs:tipoDocumentoTITULAR_8_tab8_input') as HTMLSelectElement;
+      if (!select) throw new Error('Select tipoDocumento no encontrado');
+      const option = Array.from(select.options).find(o =>
+        o.text.toUpperCase().includes(docTypeName.toUpperCase()),
+      );
+      if (!option) {
+        const available = Array.from(select.options).map(o => o.text).join(', ');
+        throw new Error(`Tipo documento "${docTypeName}" no encontrado. Disponibles: ${available}`);
+      }
+      const PF = (window as any).PF;
+      PF('tipoDocumentoTITULAR_8').selectValue(option.value);
+      if (typeof PF('tipoDocumentoTITULAR_8').triggerChange === 'function') {
+        PF('tipoDocumentoTITULAR_8').triggerChange();
+      }
     }, t.tipoDocumento);
     await page.waitForTimeout(500);
+    this.logger.log(`Tipo documento seleccionado por nombre: "${t.tipoDocumento}"`);
 
-    // Activar tab 8 para NIF autocomplete
+    // Activate tab 8 for NIF autocomplete
     await this.activateTab(page, '8');
 
-    // NIF — escribir en input con selector de atributo exacto
-    const nifInput = '[id="form_abm:tabs:numeroDocumentoTITULAR_8_tab8_input"]';
-    await page.fill(nifInput, '');
-    await page.type(nifInput, t.numeroDocumento, { delay: 50 });
-    await page.waitForTimeout(1500); // esperar RECONO NIF lookup
+    // NIF — use PF('numeroDocumentoTITULAR_8').search(nif) instead of page.fill/type
+    await page.evaluate((nif) => {
+      const PF = (window as any).PF;
+      PF('numeroDocumentoTITULAR_8').search(nif);
+    }, t.numeroDocumento);
+    await page.waitForTimeout(2000); // wait for RECONO NIF lookup
 
-    // Si aparecen sugerencias, cerrarlas
+    // If suggestions appear, close them
     await page.keyboard.press('Escape');
     await page.waitForTimeout(300);
 
-    // Razón social (puede haberse auto-rellenado tras NIF)
-    if (t.razonSocial) {
-      await page.evaluate((val) => {
-        const el = document.getElementById('form_abm:tabs:razonSocialTITULAR_8_tab8');
-        if (el && !(el as HTMLInputElement).disabled && !(el as HTMLInputElement).value) {
-          (el as HTMLInputElement).value = val;
-        }
-      }, t.razonSocial);
+    // Check if name fields were auto-populated (disabled = auto-filled by NIF lookup)
+    const nameFieldsDisabled = await page.evaluate(() => {
+      const nombre = document.getElementById('form_abm:tabs:nombreTITULAR_8_tab8') as HTMLInputElement;
+      return nombre?.disabled ?? false;
+    });
+
+    if (!nameFieldsDisabled) {
+      // Name fields not auto-populated — fill manually
+      await page.evaluate((data) => {
+        const setField = (id: string, val: string | undefined) => {
+          if (!val) return;
+          const el = document.getElementById(id) as HTMLInputElement;
+          if (el && !el.disabled && !el.value) el.value = val;
+        };
+        setField('form_abm:tabs:nombreTITULAR_8_tab8', data.nombre);
+        setField('form_abm:tabs:apellido1TITULAR_8_tab8', data.apellido1);
+        setField('form_abm:tabs:apellido2TITULAR_8_tab8', data.apellido2);
+      }, t);
+      this.logger.log('Nombre titular rellenado manualmente');
+    } else {
+      this.logger.log('Nombre titular auto-rellenado por NIF lookup');
     }
 
-    // Dirección titular (PF selects, sin activar pestaña)
+    // Dirección titular (PF selects)
     if (t.provincia) {
-      await page.evaluate((val) => {
-        (window as any).PF('provinciaTITULAR_8').selectValue(val);
-        (window as any).PF('provinciaTITULAR_8').triggerChange();
-      }, t.provincia);
-      await page.waitForTimeout(1500);
+      await this.pfSelectAndVerify(page, 'provinciaTITULAR_8', t.provincia, {
+        dependentWidget: 'poblacionTITULAR_8',
+        minDependentOptions: 2,
+        waitMs: 2000,
+        retryWaitMs: 3000,
+      });
     }
     if (t.poblacion) {
-      await page.evaluate((val) => {
-        (window as any).PF('poblacionTITULAR_8').selectValue(val);
-        (window as any).PF('poblacionTITULAR_8').triggerChange();
-      }, t.poblacion);
-      await page.waitForTimeout(500);
+      await this.pfSelectAndVerify(page, 'poblacionTITULAR_8', t.poblacion, {
+        waitMs: 1000,
+      });
     }
     if (t.tipoVia) {
-      await page.evaluate((val) => {
-        (window as any).PF('tipoViaTITULAR_8').selectValue(val);
-        (window as any).PF('tipoViaTITULAR_8').triggerChange();
-      }, t.tipoVia);
-      await page.waitForTimeout(500);
+      await this.pfSelectAndVerify(page, 'tipoViaTITULAR_8', t.tipoVia, {
+        waitMs: 500,
+      });
     }
 
-    // Vía titular — RECONO autocomplete (tab 8 ya activa)
+    // Pre-RECONO check titular
     if (t.via) {
-      const viaTitResolved = resolvedInputs?.['viaTitular'];
+      const pre = await page.evaluate(() => ({
+        prov: (window as any).PF('provinciaTITULAR_8').getSelectedValue(),
+        pob: (window as any).PF('poblacionTITULAR_8').getSelectedValue(),
+        tv: (window as any).PF('tipoViaTITULAR_8').getSelectedValue(),
+      }));
+      this.logger.log(`Pre-RECONO titular check: prov=${pre.prov}, pob=${pre.pob}, tv=${pre.tv}`);
+      if (!pre.prov || !pre.pob || !pre.tv) {
+        throw new Error(
+          `Titular: Provincia/Población/TipoVía no seteados antes de RECONO (prov=${pre.prov}, pob=${pre.pob}, tv=${pre.tv})`,
+        );
+      }
+
+      // Vía titular — RECONO autocomplete (tab 8 already active)
       await this.resolveReconoVia(
         page,
         'form_abm:tabs:viaTITULAR_8_tab8',
         t.via,
-        viaTitResolved?.value,
+        resolvedInputs?.['viaTitular'],
         'FILL_TITULAR',
         'viaTitular',
       );
     }
 
-    // Inputs dirección titular via PF widgets
+    // Direct address inputs
     await page.evaluate((data) => {
       const PF = (window as any).PF;
       if (data.numero) PF('numeroTITULAR_8').jq.val(data.numero);
@@ -422,7 +451,7 @@ export class TramitacionPlaywrightService {
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
-  // PASO 6: FILL DATOS TÉCNICOS (Tab 3 — todo via PF widgets, sin activar pestaña)
+  // PASO 6: FILL DATOS TÉCNICOS (Tab 3 — all via PF widgets)
   // ═══════════════════════════════════════════════════════════════════════════
 
   private async fillDatosTecnicos(page: Page, data: PortalSolicitudData): Promise<void> {
@@ -431,7 +460,7 @@ export class TramitacionPlaywrightService {
     await page.evaluate((data) => {
       const PF = (window as any).PF;
 
-      // Selects con triggerChange
+      // Selects
       if (data.tipoSuministro) {
         PF('tipoSuministro').selectValue(data.tipoSuministro);
         PF('tipoSuministro').triggerChange();
@@ -448,8 +477,12 @@ export class TramitacionPlaywrightService {
         PF('sistemaConexion').selectValue(data.sistemaConexion);
         PF('sistemaConexion').triggerChange();
       }
+      if (data.tipoModificacion) {
+        PF('tipoModificacion').selectValue(data.tipoModificacion);
+        PF('tipoModificacion').triggerChange();
+      }
 
-      // Inputs directos
+      // Inputs
       if (data.potenciaMaximaAdmisible) PF('potenciaMaximaAdmisible').jq.val(data.potenciaMaximaAdmisible);
       if (data.valorInterruptorGral) PF('valorInterruptorGral').jq.val(data.valorInterruptorGral);
       if (data.cups) PF('cups').jq.val(data.cups);
@@ -462,7 +495,7 @@ export class TramitacionPlaywrightService {
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
-  // PASO 7: GUARDAR — ID verificado: form_abm:btnGuardar
+  // PASO 7: GUARDAR — ID: form_abm:btnGuardar
   // ═══════════════════════════════════════════════════════════════════════════
 
   private async guardar(page: Page): Promise<void> {
@@ -470,9 +503,8 @@ export class TramitacionPlaywrightService {
       const btn = document.getElementById('form_abm:btnGuardar');
       if (btn) (btn as HTMLElement).click();
     });
-    await page.waitForTimeout(5000); // el portal tarda en guardar
+    await page.waitForTimeout(5000);
 
-    // Check for validation errors
     const hasError = await page.locator('.ui-messages-error, .ui-message-error').isVisible().catch(() => false);
     if (hasError) {
       const errorText = await page.locator('.ui-messages-error, .ui-message-error').textContent().catch(() => '');
@@ -483,136 +515,45 @@ export class TramitacionPlaywrightService {
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
-  // PASO 8: SUBIR DOCUMENTOS (Tab 4 — necesita inputs visibles, activar pestaña)
-  // ═══════════════════════════════════════════════════════════════════════════
-
-  private async subirDocumentos(
-    page: Page,
-    docs: PortalSolicitudData['documentos'],
-  ): Promise<void> {
-    // Activar tab 4
-    await this.activateTab(page, '4');
-    await page.waitForTimeout(1000);
-
-    const files = [
-      { path: docs.ciePdf, label: 'CIE' },
-      { path: docs.mtdPdf, label: 'MTD' },
-      { path: docs.solicitudBtPdf, label: 'Solicitud BT' },
-    ];
-    if (docs.unifilarPdf) {
-      files.push({ path: docs.unifilarPdf, label: 'Unifilar' });
-    }
-
-    for (const file of files) {
-      const fileInputs = page.locator('input[type="file"]');
-      const count = await fileInputs.count();
-
-      if (count > 0) {
-        await fileInputs.first().setInputFiles(file.path);
-        await page.waitForTimeout(2000);
-
-        // Click upload button if present
-        const uploadBtn = page.locator(
-          '.ui-fileupload-upload, button:has-text("Subir"), [class*="upload"]',
-        ).first();
-        const uploadVisible = await uploadBtn.isVisible().catch(() => false);
-        if (uploadVisible) {
-          await uploadBtn.click();
-          await page.waitForTimeout(2000);
-        }
-
-        this.logger.log(`Documento ${file.label} subido`);
-      } else {
-        this.logger.warn(`No se encontró input de archivo para ${file.label}`);
-      }
-    }
-
-    this.logger.log('Documentos subidos');
-  }
-
-  // ═══════════════════════════════════════════════════════════════════════════
-  // PASO 9: ENVIAR — ID verificado: form_abm:btnEnviar
-  // ═══════════════════════════════════════════════════════════════════════════
-
-  private async enviar(page: Page): Promise<void> {
-    await page.evaluate(() => {
-      const btn = document.getElementById('form_abm:btnEnviar');
-      if (btn) (btn as HTMLElement).click();
-    });
-    await page.waitForTimeout(5000);
-
-    // Handle confirmation dialog if present
-    const confirmBtn = page.locator(
-      '.ui-confirmdialog-yes, button:has-text("Sí"), button:has-text("Aceptar")',
-    ).first();
-    const confirmVisible = await confirmBtn.isVisible().catch(() => false);
-    if (confirmVisible) {
-      await confirmBtn.click();
-      await page.waitForTimeout(3000);
-    }
-
-    this.logger.log('Solicitud enviada');
-  }
-
-  // ═══════════════════════════════════════════════════════════════════════════
-  // PASO 10: VERIFICAR — ID verificado: form_abm:tabs:numeroExpediente1_tab0
-  // ═══════════════════════════════════════════════════════════════════════════
-
-  private async verificar(page: Page): Promise<string | undefined> {
-    await page.waitForTimeout(2000);
-
-    const expedienteNum = await page.evaluate(() => {
-      const el = document.getElementById('form_abm:tabs:numeroExpediente1_tab0');
-      return el ? (el as HTMLInputElement).value || undefined : undefined;
-    });
-
-    if (expedienteNum) {
-      this.logger.log(`Expediente portal: ${expedienteNum}`);
-    } else {
-      this.logger.log('Enviado correctamente, nº expediente no detectado');
-    }
-
-    return expedienteNum;
-  }
-
-  // ═══════════════════════════════════════════════════════════════════════════
-  // RECONO — Resolución de vías por autocomplete
-  //   Usa selectores CSS con IDs exactos del DOM:
-  //     input: [id="${widgetPrefix}_input"]
-  //     panel: document.getElementById("${widgetPrefix}_panel")
-  //     hidden: document.getElementById("${widgetPrefix}_hinput")
+  // RECONO — Vía autocomplete resolution (6 chars, strip article prefixes)
   // ═══════════════════════════════════════════════════════════════════════════
 
   private async resolveReconoVia(
     page: Page,
     widgetPrefix: string,
     viaName: string,
-    preSelectedUuid: string | undefined,
+    resolved: { value?: string; searchTerm?: string } | undefined,
     step: PlaywrightStep,
     fieldName: string,
   ): Promise<void> {
-    const inputId = widgetPrefix + '_input';
     const panelId = widgetPrefix + '_panel';
     const hiddenId = widgetPrefix + '_hinput';
 
+    // Extract PF widget name from prefix
+    const pfWidgetName = widgetPrefix.replace('form_abm:tabs:', '').replace(/_tab\d+$/, '');
+
     // Pre-selected UUID (NEEDS_INPUT resolution)
-    if (preSelectedUuid) {
+    if (resolved?.value) {
       await page.evaluate(({ hid, uuid }) => {
         const hidden = document.getElementById(hid);
         if (hidden) (hidden as HTMLInputElement).value = uuid;
-      }, { hid: hiddenId, uuid: preSelectedUuid });
+      }, { hid: hiddenId, uuid: resolved.value });
       return;
     }
 
-    // 1. Escribir primeras letras en el autocomplete
-    const searchTerm = viaName.substring(0, 5).toUpperCase();
-    const inputSelector = `[id="${inputId}"]`;
+    const effectiveViaName = resolved?.searchTerm || viaName;
 
-    await page.fill(inputSelector, '');
-    await page.type(inputSelector, searchTerm, { delay: 100 });
-    await page.waitForTimeout(1500);
+    // Strip article prefixes before searching, use first 6 chars
+    const normalized = normalizeViaName(effectiveViaName);
+    const searchTerm = normalized.substring(0, 6).toUpperCase();
+    this.logger.log(`RECONO search: PF('${pfWidgetName}').search('${searchTerm}')`);
 
-    // 2. Leer sugerencias del panel
+    await page.evaluate(({ wn, term }) => {
+      (window as any).PF(wn).search(term);
+    }, { wn: pfWidgetName, term: searchTerm });
+    await page.waitForTimeout(2000);
+
+    // Read suggestions
     let candidates = await page.evaluate((pid) => {
       const panel = document.getElementById(pid);
       if (!panel) return [];
@@ -622,7 +563,9 @@ export class TramitacionPlaywrightService {
       }));
     }, panelId);
 
-    // 3. Fuzzy match
+    this.logger.log(`RECONO candidates (${candidates.length}): ${candidates.map(c => c.label).join(', ')}`);
+
+    // Fuzzy match
     const normalizedSearch = normalizeViaName(viaName);
     let scored = candidates.map((c) => ({
       ...c,
@@ -630,9 +573,8 @@ export class TramitacionPlaywrightService {
     }));
     scored.sort((a, b) => b.confidence - a.confidence);
 
-    // 4. Decidir
     if (scored.length > 0 && scored[0]!.confidence >= 80) {
-      // Match automático — click en el item del panel
+      // Auto-match — click the item
       const bestUuid = scored[0]!.uuid;
       await page.evaluate(({ pid, uuid }) => {
         const panel = document.getElementById(pid);
@@ -646,15 +588,22 @@ export class TramitacionPlaywrightService {
         }
       }, { pid: panelId, uuid: bestUuid });
       await page.waitForTimeout(500);
-      this.logger.log(`RECONO auto-match: "${scored[0]!.label}" (${scored[0]!.confidence}%)`);
+
+      const hiddenVal = await page.evaluate((hid) => {
+        return (document.getElementById(hid) as HTMLInputElement)?.value || '';
+      }, hiddenId);
+      this.logger.log(`RECONO auto-match: "${scored[0]!.label}" (${scored[0]!.confidence}%) → UUID: ${hiddenVal}`);
     } else if (scored.length > 0) {
-      // Sin match claro — NEEDS_INPUT
-      throw new NeedsInputError(fieldName, scored.slice(0, 10), step);
+      throw new NeedsInputError(fieldName, scored.slice(0, 10), step, effectiveViaName);
     } else {
-      // Sin resultados — reintentar con menos letras
-      await page.fill(inputSelector, '');
-      await page.type(inputSelector, viaName.substring(0, 3).toUpperCase(), { delay: 100 });
-      await page.waitForTimeout(1500);
+      // No results — retry with fewer chars
+      const shortTerm = normalized.substring(0, 3).toUpperCase();
+      this.logger.log(`RECONO retry: PF('${pfWidgetName}').search('${shortTerm}')`);
+
+      await page.evaluate(({ wn, term }) => {
+        (window as any).PF(wn).search(term);
+      }, { wn: pfWidgetName, term: shortTerm });
+      await page.waitForTimeout(2000);
 
       candidates = await page.evaluate((pid) => {
         const panel = document.getElementById(pid);
@@ -665,14 +614,17 @@ export class TramitacionPlaywrightService {
         }));
       }, panelId);
 
+      this.logger.log(`RECONO retry candidates (${candidates.length}): ${candidates.map(c => c.label).join(', ')}`);
+
       if (candidates.length > 0) {
         throw new NeedsInputError(
           fieldName,
           candidates.slice(0, 15).map((c) => ({ ...c, confidence: 50 })),
           step,
+          effectiveViaName,
         );
       }
-      throw new Error(`No se encontró la vía "${viaName}" en RECONO`);
+      throw new NeedsInputError(fieldName, [], step, effectiveViaName);
     }
   }
 
@@ -680,10 +632,6 @@ export class TramitacionPlaywrightService {
   // HELPERS
   // ═══════════════════════════════════════════════════════════════════════════
 
-  /**
-   * Activar pestaña del formulario por su ID (0, 1, 3, 4, 8, etc.).
-   * Dentro de page.evaluate NO escapar ":" — es JS nativo, no CSS de Playwright.
-   */
   private async activateTab(page: Page, tabId: string): Promise<void> {
     await page.evaluate((id) => {
       const link = document.querySelector(
@@ -692,6 +640,89 @@ export class TramitacionPlaywrightService {
       if (link) link.click();
     }, tabId);
     await page.waitForTimeout(500);
+  }
+
+  private async pfSelectAndVerify(
+    page: Page,
+    widgetName: string,
+    value: string,
+    opts?: {
+      dependentWidget?: string;
+      minDependentOptions?: number;
+      waitMs?: number;
+      retryWaitMs?: number;
+    },
+  ): Promise<void> {
+    const {
+      dependentWidget,
+      minDependentOptions = 2,
+      waitMs = 1500,
+      retryWaitMs = 3000,
+    } = opts ?? {};
+
+    await page.evaluate(({ w, v }) => {
+      (window as any).PF(w).selectValue(v);
+      (window as any).PF(w).triggerChange();
+    }, { w: widgetName, v: value });
+    await page.waitForTimeout(waitMs);
+
+    const applied = await page.evaluate(({ w, v }) =>
+      (window as any).PF(w).getSelectedValue() === v,
+    { w: widgetName, v: value });
+
+    if (!applied) {
+      this.logger.warn(`PF('${widgetName}') valor no aplicado, reintentando...`);
+      await page.evaluate(({ w, v }) => {
+        (window as any).PF(w).selectValue(v);
+        (window as any).PF(w).triggerChange();
+      }, { w: widgetName, v: value });
+      await page.waitForTimeout(retryWaitMs);
+
+      const applied2 = await page.evaluate(({ w, v }) =>
+        (window as any).PF(w).getSelectedValue() === v,
+      { w: widgetName, v: value });
+      if (!applied2) {
+        const actual = await page.evaluate(({ w }) =>
+          (window as any).PF(w).getSelectedValue(),
+        { w: widgetName });
+        throw new Error(
+          `PF('${widgetName}') no aceptó valor "${value}" (actual: "${actual}")`,
+        );
+      }
+    }
+
+    this.logger.log(`PF('${widgetName}') = "${value}" ✓`);
+
+    if (dependentWidget) {
+      const optCount = await page.evaluate(({ w }) => {
+        const widget = (window as any).PF(w);
+        if (!widget) return 0;
+        const items = widget.items;
+        return items ? items.length : 0;
+      }, { w: dependentWidget });
+
+      this.logger.log(`PF('${dependentWidget}') opciones: ${optCount}`);
+
+      if (optCount < minDependentOptions) {
+        this.logger.warn(
+          `PF('${dependentWidget}') solo tiene ${optCount} opciones, esperando...`,
+        );
+        await page.waitForTimeout(2000);
+
+        const optCount2 = await page.evaluate(({ w }) => {
+          const widget = (window as any).PF(w);
+          if (!widget) return 0;
+          const items = widget.items;
+          return items ? items.length : 0;
+        }, { w: dependentWidget });
+
+        if (optCount2 < minDependentOptions) {
+          throw new Error(
+            `PF('${dependentWidget}') no cargó opciones tras PF('${widgetName}') = "${value}" (opciones: ${optCount2})`,
+          );
+        }
+      }
+    }
   }
 
   private async screenshot(

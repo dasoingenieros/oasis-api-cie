@@ -1,6 +1,8 @@
 import { Logger } from '@nestjs/common';
 import { Processor, WorkerHost } from '@nestjs/bullmq';
 import { Job } from 'bullmq';
+import * as fs from 'fs';
+import * as path from 'path';
 import { PrismaService } from '../prisma/prisma.service';
 import { TramitacionMapperService } from './tramitacion-mapper.service';
 import { TramitacionPlaywrightService, NeedsInputError } from './tramitacion-playwright.service';
@@ -35,6 +37,7 @@ export class TramitacionProcessor extends WorkerHost {
       job.data;
 
     this.logger.log(`Procesando expediente ${expedienteId} (job ${job.id})`);
+    const tmpDir = path.join('/tmp/tramitacion', expedienteId);
 
     try {
       // Mark as IN_PROGRESS
@@ -69,20 +72,18 @@ export class TramitacionProcessor extends WorkerHost {
         password: this.crypto.decrypt(config.portalPassword),
       };
 
-      // 3. Map installation to portal format
-      // TODO: generate real document PDFs; for now use placeholders
-      const documentPaths = {
-        ciePdf: '/tmp/tramitacion/cie.pdf',
-        mtdPdf: '/tmp/tramitacion/mtd.pdf',
-        solicitudBtPdf: '/tmp/tramitacion/solicitud_bt.pdf',
-      };
+      // 3. Extract real document PDFs from DB
+      const documentPaths = await this.extractDocuments(installationId, tmpDir);
+
+      // 4. Map installation to portal format
       const portalData = this.mapper.mapInstallation(
         installation,
         eiciId,
+        config.portalEiciName ?? 'INGEIN',
         documentPaths,
       );
 
-      // 4. Progress callback
+      // 5. Progress callback
       const onProgress = async (
         step: PlaywrightStep,
         progress: number,
@@ -94,7 +95,7 @@ export class TramitacionProcessor extends WorkerHost {
         await job.updateProgress(progress);
       };
 
-      // 5. Execute Playwright flow
+      // 6. Execute Playwright flow (stops at SAVED, no auto-send)
       const result = await this.playwright.ejecutarTramitacion(
         portalData,
         credentials,
@@ -103,23 +104,21 @@ export class TramitacionProcessor extends WorkerHost {
         resolvedInputs,
       );
 
-      // 6. Mark as SENT/REGISTERED
+      // 7. Mark as SAVED (campos rellenados y guardados, sin subir documentos)
       await this.prisma.tramitacionExpediente.update({
         where: { id: expedienteId },
         data: {
-          status: result.portalExpediente ? 'REGISTERED' : 'SENT',
-          portalExpediente: result.portalExpediente,
+          status: 'SAVED',
           portalData: portalData as any,
           screenshots: result.screenshots as any,
           progress: 100,
-          currentStep: 'VERIFY',
-          sentAt: new Date(),
+          currentStep: 'SAVE',
           completedAt: new Date(),
         },
       });
 
       this.logger.log(
-        `Expediente ${expedienteId} completado — portal: ${result.portalExpediente ?? 'sin nº'}`,
+        `Expediente ${expedienteId} completado — campos guardados en portal`,
       );
     } catch (err: any) {
       if (err instanceof NeedsInputError) {
@@ -132,6 +131,7 @@ export class TramitacionProcessor extends WorkerHost {
             needsInputData: {
               field: err.field,
               candidates: err.candidates as any,
+              searchTerm: err.searchTerm ?? null,
             },
             errorMessage: null,
           },
@@ -156,6 +156,75 @@ export class TramitacionProcessor extends WorkerHost {
         err.stack,
       );
       throw err; // Re-throw so BullMQ retries
+    } finally {
+      // Clean up temp files
+      this.cleanupTempDir(tmpDir);
+    }
+  }
+
+  /**
+   * Extracts PDF documents from the Document table and writes them to temp files.
+   * Documents needed: CIE (CERTIFICADO), MTD (MEMORIA_TECNICA), Solicitud BT (SOLICITUD).
+   */
+  private async extractDocuments(
+    installationId: string,
+    tmpDir: string,
+  ): Promise<{ ciePdf: string; mtdPdf: string; solicitudBtPdf: string }> {
+    // Ensure temp directory exists
+    fs.mkdirSync(tmpDir, { recursive: true });
+
+    // Query latest PDF documents for this installation
+    const documents = await this.prisma.document.findMany({
+      where: {
+        installationId,
+        mimeType: 'application/pdf',
+        type: { in: ['CERTIFICADO', 'MEMORIA_TECNICA', 'SOLICITUD'] },
+      },
+      orderBy: { generatedAt: 'desc' },
+    });
+
+    const ciePdf = documents.find(d => d.type === 'CERTIFICADO');
+    const mtdPdf = documents.find(d => d.type === 'MEMORIA_TECNICA');
+    const solicitudBtPdf = documents.find(d => d.type === 'SOLICITUD');
+
+    if (!ciePdf?.content) {
+      throw new Error('Documento CIE (CERTIFICADO) no encontrado o sin contenido');
+    }
+    if (!mtdPdf?.content) {
+      throw new Error('Documento MTD (MEMORIA_TECNICA) no encontrado o sin contenido');
+    }
+    if (!solicitudBtPdf?.content) {
+      throw new Error('Documento Solicitud BT (SOLICITUD) no encontrado o sin contenido');
+    }
+
+    // Write PDF buffers to temp files
+    const ciePath = path.join(tmpDir, 'cie.pdf');
+    const mtdPath = path.join(tmpDir, 'mtd.pdf');
+    const solicitudPath = path.join(tmpDir, 'solicitud_bt.pdf');
+
+    fs.writeFileSync(ciePath, ciePdf.content);
+    fs.writeFileSync(mtdPath, mtdPdf.content);
+    fs.writeFileSync(solicitudPath, solicitudBtPdf.content);
+
+    this.logger.log(
+      `Documentos extraídos: CIE (${ciePdf.content.length}b), MTD (${mtdPdf.content.length}b), Solicitud (${solicitudBtPdf.content.length}b)`,
+    );
+
+    return {
+      ciePdf: ciePath,
+      mtdPdf: mtdPath,
+      solicitudBtPdf: solicitudPath,
+    };
+  }
+
+  private cleanupTempDir(tmpDir: string): void {
+    try {
+      if (fs.existsSync(tmpDir)) {
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+        this.logger.log(`Temp dir limpiado: ${tmpDir}`);
+      }
+    } catch {
+      // Non-critical
     }
   }
 }

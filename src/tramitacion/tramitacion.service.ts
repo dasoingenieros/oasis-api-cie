@@ -150,7 +150,9 @@ export class TramitacionService {
     // Guardar la resolución y re-encolar
     const resolvedInputs = {
       ...(expediente.needsInputData as any)?.resolvedInputs,
-      [dto.field]: { value: dto.selectedValue, label: dto.selectedLabel ?? '' },
+      [dto.field]: dto.searchTerm
+        ? { searchTerm: dto.searchTerm }
+        : { value: dto.selectedValue, label: dto.selectedLabel ?? '' },
     };
 
     await this.prisma.tramitacionExpediente.update({

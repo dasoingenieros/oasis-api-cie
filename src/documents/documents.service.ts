@@ -335,7 +335,7 @@ export class DocumentsService {
       tecnicoColegio: (inst as any).technician?.colegioOficial,
       memoriaDescriptiva: inst.memoriaDescriptiva,
       firmaLugar: inst.firmaLugar || 'MADRID', esquemaDistribucion: inst.esquemaDistribucion,
-      phaseSystem: inst.supplyVoltage === 400 ? 'three' : 'single',
+      phaseSystem: (inst.supplyVoltage === 400 || inst.supplyVoltage === 380) ? 'three' : 'single',
       cdtDi: inst.cdtDi ?? undefined, contadorUbicacion: inst.contadorUbicacion,
     };
 
