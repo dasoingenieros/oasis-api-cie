@@ -72,15 +72,12 @@ export class TramitacionProcessor extends WorkerHost {
         password: this.crypto.decrypt(config.portalPassword),
       };
 
-      // 3. Extract real document PDFs from DB
-      const documentPaths = await this.extractDocuments(installationId, tmpDir);
-
-      // 4. Map installation to portal format
+      // 3. Map installation to portal format (sin documentos — solo campos)
       const portalData = this.mapper.mapInstallation(
         installation,
         eiciId,
         config.portalEiciName ?? 'INGEIN',
-        documentPaths,
+        { ciePdf: '', mtdPdf: '', solicitudBtPdf: '' },
       );
 
       // 5. Progress callback
