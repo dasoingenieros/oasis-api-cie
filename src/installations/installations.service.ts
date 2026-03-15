@@ -162,6 +162,7 @@ export class InstallationsService {
       await this.prisma.differential.deleteMany({ where: { panelId: { in: panels.map(p => p.id) } } });
     }
     await this.prisma.electricalPanel.deleteMany({ where: { installationId: id } });
+    await this.prisma.tramitacionExpediente.deleteMany({ where: { installationId: id } });
     await this.prisma.installation.delete({ where: { id } });
   }
 

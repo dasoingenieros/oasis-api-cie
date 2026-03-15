@@ -56,7 +56,7 @@ ENV PLAYWRIGHT_BROWSERS_PATH=/app/.cache/ms-playwright
 RUN npx playwright-core install chromium
 
 RUN groupadd -r appuser && useradd -r -g appuser -d /app appuser \
-    && mkdir -p /app/tmp /app/.config && chown -R appuser:appuser /app
+    && mkdir -p /app/tmp /app/.config /app/uploads/signed && chown -R appuser:appuser /app
 USER appuser
 
 ENV HOME=/app

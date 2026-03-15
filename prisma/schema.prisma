@@ -328,6 +328,10 @@ model Installation {
   panel                  ElectricalPanel?
   unifilarLayout         UnifilarLayout?
   tramitacionExpedientes TramitacionExpediente[]
+  feedbackReports        FeedbackReport[]
+
+  // Cuadro Eléctrico v2 (árbol)
+  panelNodes      PanelNode[]
 
   @@index([tenantId])
   @@index([userId])
@@ -513,9 +517,43 @@ model Document {
   version        Int          @default(1)
   isDraft        Boolean      @default(false)
 
+  // Review workflow
+  reviewStatus   String       @default("PENDING") // PENDING, APPROVED, NEEDS_REVIEW, REPORTED
+  reviewedAt     DateTime?
+  reviewNote     String?      // e.g. "section:2" for navigation
+
+  signedAt       DateTime?
+  signedFileUrl  String?      @db.VarChar(500)
+  signerName     String?      @db.VarChar(200)
+
   generatedAt DateTime @default(now())
 
+  feedbackReports FeedbackReport[]
+
   @@index([installationId])
+}
+
+// ── Feedback Reports ─────────────────────────────────────────────────────────
+
+model FeedbackReport {
+  id             String   @id @default(cuid())
+  tenantId       String
+  installationId String
+  documentId     String?
+  documentType   String?  // CERTIFICADO, MEMORIA_TECNICA, etc.
+  description    String
+  screenshotKey  String?  // path to uploaded screenshot
+  status         String   @default("OPEN") // OPEN, ACKNOWLEDGED, RESOLVED
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  installation Installation @relation(fields: [installationId], references: [id])
+  document     Document?    @relation(fields: [documentId], references: [id])
+
+  @@index([tenantId])
+  @@index([installationId])
+  @@index([status])
 }
 
 enum DocumentType {
@@ -763,4 +801,78 @@ model WaitlistEntry {
 
   @@index([tenantId])
   @@index([installationType])
+}
+
+// ============================================================
+// CUADRO ELÉCTRICO v2 — Árbol PanelNode
+// ============================================================
+
+enum PanelNodeType {
+  IGA                       // Interruptor General Automático (raíz del cuadro/subcuadro)
+  PROTECTOR_SOBRETENSIONES  // SPD (después del IGA, opcional)
+  AUTOMATICO                // Magnetotérmico (protección de línea o de diferencial)
+  DIFERENCIAL               // Interruptor diferencial (2P/4P)
+  GUARDAMOTOR               // Protección específica para motores
+  CONTACTOR                 // Control horario, maniobra
+  SUBCUADRO                 // Contiene su propio árbol (hijos empiezan por IGA del subcuadro)
+  CIRCUITO                  // Hoja final — circuito con carga
+}
+
+model PanelNode {
+  id              String         @id @default(cuid())
+  tenantId        String
+  installationId  String
+  parentId        String?        // null = cuelga del embarrado principal (raíz)
+  position        Int            // Orden entre hermanos (0, 1, 2...)
+
+  // --- Tipo de nodo ---
+  nodeType        PanelNodeType
+  name            String?        // Nombre descriptivo (ej: "C1 - Iluminación", "Dif. 1")
+
+  // --- Campos de protección (IGA, AUTOMATICO, DIFERENCIAL, GUARDAMOTOR) ---
+  calibreA        Int?           // Intensidad nominal (A): 6, 10, 16, 20, 25, 32, 40, 50, 63, 80, 100
+  polos           String?        // "2P", "3P", "4P"
+  curva           String?        // "B", "C", "D"
+  poderCorteKa    Float?         // Poder de corte (kA): 6, 10, 15, 25, 50
+
+  // --- Campos de diferencial (DIFERENCIAL) ---
+  sensitivityMa   Int?           // Sensibilidad (mA): 10, 30, 100, 300, 500
+  diffType        String?        // Tipo: "AC", "A", "B", "F"
+
+  // --- Campos de circuito (CIRCUITO) ---
+  loadType        String?        // "Fuerza", "Alumbrado", "Alum.Emerg.", "Motor", "Resistivo", "IRVE", "Domotica"
+  power           Float?         // Potencia (W)
+  voltage         Int?           // Tensión (V): 230, 400
+  phases          String?        // "1F", "3F"
+  cosPhi          Float?         // Factor de potencia (0.0 - 1.0)
+  length          Float?         // Longitud del conductor (m)
+  section         Float?         // Sección del conductor elegida por usuario (mm²)
+  cableType       String?        // Designación: "H07V-K", "H07Z1-K", "RV-K", "RZ1-K", "EPR"
+  material        String?        // "CU", "AL"
+  installMethod   String?        // Método de instalación ITC-BT-19: "B1", "B2", "C", "D", "E", "F"
+  quantity        Int?           // Cantidad de puntos/tomas (para ITC-BT-25)
+
+  // --- Campos de subcuadro (SUBCUADRO) ---
+  subcuadroName   String?        // Nombre del subcuadro
+
+  // --- Campos de contactor (CONTACTOR) ---
+  contactorType   String?        // "HORARIO", "MANIOBRA", "POTENCIA"
+
+  // --- Resultados calculados (JSON, se sobreescriben en cada cálculo) ---
+  calcResults     Json?
+
+  // --- Relaciones ---
+  parent          PanelNode?     @relation("PanelNodeTree", fields: [parentId], references: [id], onDelete: Cascade)
+  children        PanelNode[]    @relation("PanelNodeTree")
+  installation    Installation   @relation(fields: [installationId], references: [id], onDelete: Cascade)
+
+  // --- Timestamps ---
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  // --- Índices ---
+  @@index([tenantId])
+  @@index([installationId])
+  @@index([parentId])
+  @@index([installationId, parentId, position])
 }

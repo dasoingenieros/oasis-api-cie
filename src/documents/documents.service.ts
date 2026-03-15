@@ -6,11 +6,15 @@
 import {
   Injectable, NotFoundException, BadRequestException, ForbiddenException, Logger, Inject,
 } from '@nestjs/common';
+import * as path from 'path';
+import * as fs from 'fs';
+import { promises as fsp } from 'fs';
 import { PrismaService } from '../prisma/prisma.service';
 import { SubscriptionsService } from '../subscriptions/subscriptions.service';
 import { generateMtdPdf, MtdInstallationData, MtdCircuitData } from './mtd-pdf-generator';
 import { CieExcelGeneratorService } from './cie-excel-generator.service';
 import { SolicitudBtGeneratorService } from './solicitud-bt-generator.service';
+import { buildNormalizedFilename } from './filename-utils';
 
 @Injectable()
 export class DocumentsService {
@@ -87,9 +91,87 @@ export class DocumentsService {
       select: {
         id: true, installationId: true, type: true, filename: true,
         mimeType: true, sizeBytes: true, isDraft: true, generatedAt: true,
-        version: true,
+        version: true, signedAt: true, signedFileUrl: true, signerName: true,
+        reviewStatus: true, reviewedAt: true, reviewNote: true,
       },
     });
+  }
+
+  // ─── Aprobar documento ────────────────────────────────────
+
+  async approveDocument(installationId: string, documentId: string, tenantId: string) {
+    await this.verifyInstallation(installationId, tenantId);
+    const doc = await this.prisma.document.findFirst({ where: { id: documentId, installationId } });
+    if (!doc) throw new NotFoundException('Documento no encontrado');
+
+    return this.prisma.document.update({
+      where: { id: documentId },
+      data: { reviewStatus: 'APPROVED', reviewedAt: new Date(), reviewNote: null },
+      select: {
+        id: true, installationId: true, type: true, filename: true,
+        mimeType: true, sizeBytes: true, isDraft: true, generatedAt: true,
+        version: true, signedAt: true, signedFileUrl: true, signerName: true,
+        reviewStatus: true, reviewedAt: true, reviewNote: true,
+      },
+    });
+  }
+
+  // ─── Actualizar estado de revisión ────────────────────────
+
+  async updateReviewStatus(
+    installationId: string, documentId: string, tenantId: string,
+    reviewStatus: string, reviewNote?: string,
+  ) {
+    await this.verifyInstallation(installationId, tenantId);
+    const doc = await this.prisma.document.findFirst({ where: { id: documentId, installationId } });
+    if (!doc) throw new NotFoundException('Documento no encontrado');
+
+    return this.prisma.document.update({
+      where: { id: documentId },
+      data: { reviewStatus, reviewedAt: new Date(), reviewNote: reviewNote || null },
+      select: {
+        id: true, installationId: true, type: true, filename: true,
+        mimeType: true, sizeBytes: true, isDraft: true, generatedAt: true,
+        version: true, signedAt: true, signedFileUrl: true, signerName: true,
+        reviewStatus: true, reviewedAt: true, reviewNote: true,
+      },
+    });
+  }
+
+  // ─── Crear reporte de feedback ────────────────────────────
+
+  async createFeedbackReport(
+    installationId: string, documentId: string, tenantId: string,
+    description: string, documentType?: string, screenshotFile?: Express.Multer.File,
+  ) {
+    await this.verifyInstallation(installationId, tenantId);
+    const doc = await this.prisma.document.findFirst({ where: { id: documentId, installationId } });
+    if (!doc) throw new NotFoundException('Documento no encontrado');
+
+    let screenshotKey: string | null = null;
+    if (screenshotFile) {
+      const dir = path.join('uploads', 'feedback', installationId);
+      await fsp.mkdir(dir, { recursive: true });
+      screenshotKey = path.join(dir, `${Date.now()}_${screenshotFile.originalname}`);
+      await fsp.rename(screenshotFile.path, screenshotKey);
+    }
+
+    const report = await this.prisma.feedbackReport.create({
+      data: {
+        tenantId, installationId, documentId,
+        documentType: documentType || doc.type,
+        description, screenshotKey, status: 'OPEN',
+      },
+    });
+
+    // Mark document as REPORTED
+    await this.prisma.document.update({
+      where: { id: documentId },
+      data: { reviewStatus: 'REPORTED', reviewedAt: new Date() },
+    });
+
+    this.logger.log(`Feedback report created: ${report.id} for doc ${documentId}`);
+    return report;
   }
 
   // ─── Generar MTD u otros ───────────────────────────────────
@@ -256,6 +338,72 @@ export class DocumentsService {
     return { deleted: true };
   }
 
+  // ─── Subir documento firmado ───────────────────────────────
+
+  async uploadSigned(
+    installationId: string,
+    documentId: string,
+    tenantId: string,
+    file: Express.Multer.File,
+    signerName?: string,
+  ) {
+    const installation = await this.verifyInstallation(installationId, tenantId);
+    const doc = await this.prisma.document.findFirst({
+      where: { id: documentId, installationId },
+    });
+    if (!doc) throw new NotFoundException('Documento no encontrado');
+
+    // Delete old signed file if replacing
+    if (doc.signedFileUrl) {
+      const oldPath = path.resolve(doc.signedFileUrl);
+      if (fs.existsSync(oldPath)) {
+        await fsp.unlink(oldPath);
+      }
+    }
+
+    // Store relative path: uploads/signed/{installationId}/{timestamp}.pdf
+    const dir = path.join('uploads', 'signed', installationId);
+    await fsp.mkdir(dir, { recursive: true });
+    const relativePath = path.join(dir, `${Date.now()}.pdf`);
+    await fsp.rename(file.path, relativePath);
+
+    const updated = await this.prisma.document.update({
+      where: { id: documentId },
+      data: {
+        signedAt: new Date(),
+        signedFileUrl: relativePath,
+        signerName: signerName || null,
+      },
+      select: {
+        id: true, installationId: true, type: true, filename: true,
+        mimeType: true, sizeBytes: true, isDraft: true, generatedAt: true,
+        version: true, signedAt: true, signedFileUrl: true, signerName: true,
+      },
+    });
+
+    this.logger.log(`Documento firmado subido: ${doc.type} (${documentId})`);
+    return updated;
+  }
+
+  // ─── Descargar documento firmado ──────────────────────────
+
+  async downloadSigned(installationId: string, documentId: string, tenantId: string) {
+    const installation = await this.verifyInstallation(installationId, tenantId);
+    const doc = await this.prisma.document.findFirst({
+      where: { id: documentId, installationId },
+    });
+    if (!doc) throw new NotFoundException('Documento no encontrado');
+    if (!doc.signedFileUrl) throw new BadRequestException('El documento no tiene versión firmada');
+
+    const filePath = path.resolve(doc.signedFileUrl);
+    if (!fs.existsSync(filePath)) {
+      throw new NotFoundException('Archivo firmado no encontrado en disco');
+    }
+
+    const filename = buildNormalizedFilename(installation, doc.type, 'pdf', true);
+    return { filePath, filename };
+  }
+
   // ─── MTD PDF (unchanged from session 13) ───────────────────
 
   private async generateMtdPdfBuffer(installation: any, calc: any): Promise<Buffer> {
@@ -371,10 +519,8 @@ export class DocumentsService {
     return installation;
   }
 
-  private buildFilename(installation: any, type: string, version: number, ext = 'pdf'): string {
-    const address = (installation.address || 'instalacion').replace(/[^a-zA-Z0-9áéíóúñÁÉÍÓÚÑ ]/g, '').replace(/\s+/g, '_').substring(0, 30);
-    const typeShort = type === 'MEMORIA_TECNICA' ? 'MTD' : type === 'CERTIFICADO' ? 'CIE' : type === 'SOLICITUD' ? 'SOL' : 'UNIF';
-    return `${typeShort}_${address}_v${version}.${ext}`;
+  private buildFilename(installation: any, type: string, _version: number, ext = 'pdf'): string {
+    return buildNormalizedFilename(installation, type, ext);
   }
 
   private buildHtmlFallback(installation: any, calc: any, type: string): string {

@@ -24,6 +24,7 @@ import { WaitlistModule } from './waitlist/waitlist.module';
 import { ConsentModule } from './consent/consent.module';
 import { TeamModule } from './team/team.module';
 import { TramitacionModule } from './tramitacion/tramitacion.module';
+import { PanelNodesModule } from './panel-nodes/panel-nodes.module';
 import configuration from './config/configuration';
 import type { AppConfig } from './config/configuration';
 
@@ -66,6 +67,7 @@ import type { AppConfig } from './config/configuration';
     ConsentModule,
     TeamModule,
     TramitacionModule,
+    PanelNodesModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },

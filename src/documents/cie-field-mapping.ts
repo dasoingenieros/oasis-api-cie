@@ -109,7 +109,6 @@ export const EMPRESA_FIELDS: CieFieldMapping[] = [
   { cell: 'C34', col: 'C', row: 33, field: 'empresaLocalidad', type: 'db', valueType: 'string' },
   { cell: 'I34', col: 'I', row: 33, field: 'empresaProvincia', type: 'db', valueType: 'string' },
   { cell: 'M34', col: 'M', row: 33, field: 'empresaTelefono',  type: 'db', valueType: 'string' },
-  { cell: 'P34', col: 'P', row: 33, field: 'empresaMovil',     type: 'db', valueType: 'string' },
   { cell: 'R34', col: 'R', row: 33, field: 'empresaEmail',     type: 'db', valueType: 'string' },
 ];
 

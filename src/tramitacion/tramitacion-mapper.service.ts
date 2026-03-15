@@ -41,7 +41,7 @@ export class TramitacionMapperService {
       tipoDocumentacion: (installation.tipoDocumentacion ?? 'MTD').toUpperCase() === 'PROYECTO' ? 'PROYECTO' : 'MTD',
 
       emplazamiento: {
-        provincia: installation.emplazProvincia ?? PROVINCIA.MADRID,
+        provincia: PROVINCIA.MADRID,
         poblacion: this.lookupPoblacion(installation.emplazLocalidad),
         tipoVia: this.lookupTipoVia(installation.emplazTipoVia),
         via: installation.emplazNombreVia ?? '',
@@ -59,7 +59,7 @@ export class TramitacionMapperService {
         nombre: installation.titularNombre ?? undefined,
         apellido1: installation.titularApellido1 ?? undefined,
         apellido2: installation.titularApellido2 ?? undefined,
-        provincia: installation.titularProvincia ?? PROVINCIA.MADRID,
+        provincia: PROVINCIA.MADRID,
         poblacion: this.lookupPoblacion(installation.titularLocalidad),
         tipoVia: this.lookupTipoVia(installation.titularTipoVia),
         via: installation.titularNombreVia ?? undefined,

@@ -361,32 +361,38 @@ export class TramitacionPlaywrightService {
     }, t.numeroDocumento);
     await page.waitForTimeout(2000); // wait for RECONO NIF lookup
 
-    // If suggestions appear, close them
-    await page.keyboard.press('Escape');
-    await page.waitForTimeout(300);
-
-    // Check if name fields were auto-populated (disabled = auto-filled by NIF lookup)
-    const nameFieldsDisabled = await page.evaluate(() => {
-      const nombre = document.getElementById('form_abm:tabs:nombreTITULAR_8_tab8') as HTMLInputElement;
-      return nombre?.disabled ?? false;
-    });
-
-    if (!nameFieldsDisabled) {
-      // Name fields not auto-populated — fill manually
-      await page.evaluate((data) => {
-        const setField = (id: string, val: string | undefined) => {
-          if (!val) return;
-          const el = document.getElementById(id) as HTMLInputElement;
-          if (el && !el.disabled && !el.value) el.value = val;
-        };
-        setField('form_abm:tabs:nombreTITULAR_8_tab8', data.nombre);
-        setField('form_abm:tabs:apellido1TITULAR_8_tab8', data.apellido1);
-        setField('form_abm:tabs:apellido2TITULAR_8_tab8', data.apellido2);
-      }, t);
-      this.logger.log('Nombre titular rellenado manualmente');
+    // If suggestions appear, click first result then close
+    const hasSuggestions = await page.locator('.ui-autocomplete-panel:visible .ui-autocomplete-item').first().isVisible().catch(() => false);
+    if (hasSuggestions) {
+      await page.locator('.ui-autocomplete-panel:visible .ui-autocomplete-item').first().click();
+      await page.waitForTimeout(500);
     } else {
-      this.logger.log('Nombre titular auto-rellenado por NIF lookup');
+      await page.keyboard.press('Escape');
+      await page.waitForTimeout(300);
     }
+
+    // Force NIF value into input + hidden (PF search may not persist the value)
+    await page.evaluate((nif) => {
+      const input = document.getElementById('form_abm:tabs:numeroDocumentoTITULAR_8_tab8_input') as HTMLInputElement;
+      const hidden = document.getElementById('form_abm:tabs:numeroDocumentoTITULAR_8_tab8_hinput') as HTMLInputElement;
+      if (input) input.value = nif;
+      if (hidden) hidden.value = nif;
+    }, t.numeroDocumento);
+
+    // Force name fields: enable if disabled (NIF lookup disables them) and set values
+    // Disabled fields are NOT submitted with the form, so we must re-enable them
+    await page.evaluate((data) => {
+      const forceField = (id: string, val: string | undefined) => {
+        const el = document.getElementById(id) as HTMLInputElement;
+        if (!el) return;
+        el.disabled = false;
+        if (val) el.value = val;
+      };
+      forceField('form_abm:tabs:nombreTITULAR_8_tab8', data.nombre);
+      forceField('form_abm:tabs:apellido1TITULAR_8_tab8', data.apellido1);
+      forceField('form_abm:tabs:apellido2TITULAR_8_tab8', data.apellido2 || '');
+    }, t);
+    this.logger.log('Nombre titular forzado (disabled=false, valores seteados)');
 
     // Dirección titular (PF selects)
     if (t.provincia) {
@@ -482,9 +488,26 @@ export class TramitacionPlaywrightService {
         PF('tipoModificacion').triggerChange();
       }
 
-      // Inputs
-      if (data.potenciaMaximaAdmisible) PF('potenciaMaximaAdmisible').jq.val(data.potenciaMaximaAdmisible);
-      if (data.valorInterruptorGral) PF('valorInterruptorGral').jq.val(data.valorInterruptorGral);
+      // Inputs — PrimeFaces InputNumber: use setValue() to update internal state + display
+      const setInputNumber = (widgetName: string, tabId: string, val: any) => {
+        if (val == null) return;
+        try {
+          const widget = PF(widgetName);
+          if (typeof widget.setValue === 'function') {
+            widget.setValue(val);
+          } else {
+            widget.jq.val(val);
+          }
+        } catch {
+          // Fallback: force value directly on the DOM input
+          const input = document.getElementById(`form_abm:tabs:${widgetName}_${tabId}_input`) as HTMLInputElement;
+          const hidden = document.getElementById(`form_abm:tabs:${widgetName}_${tabId}_hinput`) as HTMLInputElement;
+          if (input) input.value = String(val);
+          if (hidden) hidden.value = String(val);
+        }
+      };
+      setInputNumber('potenciaMaximaAdmisible', 'tab3', data.potenciaMaximaAdmisible);
+      setInputNumber('valorInterruptorGral', 'tab3', data.valorInterruptorGral);
       if (data.cups) PF('cups').jq.val(data.cups);
       if (data.seccionAcometida) PF('seccionAcometida').jq.val(data.seccionAcometida);
       if (data.descripcionInstalacion) PF('descripcionInstalacion').jq.val(data.descripcionInstalacion);
