@@ -18,6 +18,7 @@ import { UpdatePanelNodeDto } from './dto/update-panel-node.dto';
 import { MovePanelNodeDto } from './dto/move-panel-node.dto';
 import type { SafeUser } from '../users/users.service';
 import type { PanelNode } from '@prisma/client';
+import type { TreeValidation } from './panel-nodes.service';
 
 @Controller('installations/:installationId/panel-nodes')
 @UseGuards(JwtAuthGuard)
@@ -93,14 +94,27 @@ export class PanelNodesController {
   }
 
   /**
+   * GET /api/v1/installations/:installationId/panel-nodes/validate
+   * Devuelve errores, warnings e info del árbol.
+   */
+  @Get('validate')
+  validateTree(
+    @Param('installationId') installationId: string,
+    @CurrentUser() user: SafeUser,
+  ): Promise<TreeValidation> {
+    return this.panelNodesService.validateTree(installationId, user.tenantId);
+  }
+
+  /**
    * POST /api/v1/installations/:installationId/panel-nodes/calculate
    * Calcula todos los circuitos del árbol v2.
+   * Devuelve nodos actualizados + validación.
    */
   @Post('calculate')
   calculateTree(
     @Param('installationId') installationId: string,
     @CurrentUser() user: SafeUser,
-  ): Promise<PanelNode[]> {
+  ): Promise<{ nodes: PanelNode[]; validation: TreeValidation }> {
     return this.panelNodesService.calculateTreeV2(
       installationId,
       user.tenantId,

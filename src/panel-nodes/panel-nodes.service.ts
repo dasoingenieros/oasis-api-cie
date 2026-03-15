@@ -17,6 +17,19 @@ import {
 } from '@daso/electrical-engine';
 import type { CircuitInput, CircuitCode, DIInput } from '@daso/electrical-engine';
 
+export interface TreeValidationItem {
+  nodeId: string | null;
+  rule: string;
+  message: string;
+  severity: 'error' | 'warning' | 'info';
+}
+
+export interface TreeValidation {
+  errors: TreeValidationItem[];
+  warnings: TreeValidationItem[];
+  info: TreeValidationItem[];
+}
+
 @Injectable()
 export class PanelNodesService {
   constructor(private readonly prisma: PrismaService) {}
@@ -410,7 +423,7 @@ export class PanelNodesService {
   async calculateTreeV2(
     installationId: string,
     tenantId: string,
-  ): Promise<PanelNode[]> {
+  ): Promise<{ nodes: PanelNode[]; validation: TreeValidation }> {
     // 1. Leer árbol completo
     const nodes = await this.prisma.panelNode.findMany({
       where: { installationId, tenantId },
@@ -533,11 +546,201 @@ export class PanelNodesService {
       });
     }
 
-    // 7. Devolver árbol actualizado
-    return this.prisma.panelNode.findMany({
+    // 7. Devolver árbol actualizado + validación
+    const updatedNodes = await this.prisma.panelNode.findMany({
       where: { installationId, tenantId },
       orderBy: { position: 'asc' },
     });
+
+    const validation = await this.validateTree(installationId, tenantId);
+
+    return { nodes: updatedNodes, validation };
+  }
+
+  // ─── Validación del árbol ───────────────────────────────────
+
+  /**
+   * Valida el árbol de nodos contra reglas REBT.
+   * No impide guardar ni calcular — solo informa.
+   */
+  async validateTree(
+    installationId: string,
+    tenantId: string,
+  ): Promise<{ errors: TreeValidationItem[]; warnings: TreeValidationItem[]; info: TreeValidationItem[] }> {
+    const nodes = await this.getTree(installationId, tenantId);
+    const nodeMap = new Map(nodes.map((n) => [n.id, n]));
+
+    const errors: TreeValidationItem[] = [];
+    const warnings: TreeValidationItem[] = [];
+    const info: TreeValidationItem[] = [];
+
+    // Regla 3 — IGA obligatorio
+    const igaRoots = nodes.filter(
+      (n) => n.nodeType === 'IGA' && n.parentId === null,
+    );
+    if (igaRoots.length === 0) {
+      errors.push({
+        nodeId: null,
+        rule: 'IGA_MISSING',
+        message: 'Falta el IGA (Interruptor General Automático)',
+        severity: 'error',
+      });
+    } else if (igaRoots.length > 1) {
+      errors.push({
+        nodeId: null,
+        rule: 'IGA_MULTIPLE',
+        message: 'Más de un IGA raíz',
+        severity: 'error',
+      });
+    }
+
+    // Regla 1 — Protección diferencial: In automático ≤ In diferencial
+    const differentials = nodes.filter((n) => n.nodeType === 'DIFERENCIAL');
+    for (const diff of differentials) {
+      const diffCalA = diff.calibreA;
+      if (diffCalA == null) continue; // sin calibre, no se puede validar
+
+      // Buscar protección aguas arriba (AUTOMATICO o IGA más cercano)
+      const upstream = this.findUpstreamProtection(diff, nodeMap);
+      if (!upstream) {
+        warnings.push({
+          nodeId: diff.id,
+          rule: 'DIFF_PROTECTION',
+          message: `Diferencial ${diff.name || 'sin nombre'} (${diffCalA}A) sin protección automática aguas arriba`,
+          severity: 'warning',
+        });
+      } else if (upstream.calibreA != null && upstream.calibreA > diffCalA) {
+        warnings.push({
+          nodeId: diff.id,
+          rule: 'DIFF_PROTECTION',
+          message: `Diferencial ${diff.name || 'sin nombre'} (${diffCalA}A) no está protegido: automático aguas arriba ${upstream.name || ''} es ${upstream.calibreA}A > ${diffCalA}A`,
+          severity: 'warning',
+        });
+      }
+    }
+
+    // Regla 2 — Circuitos trifásicos bajo diferencial 2P
+    const circuits = nodes.filter((n) => n.nodeType === 'CIRCUITO');
+    for (const circ of circuits) {
+      if (circ.phases !== '3F') continue;
+
+      const upstreamDiff = this.findUpstreamOfType(circ, 'DIFERENCIAL', nodeMap);
+      if (upstreamDiff && this.isPolos2P(upstreamDiff.polos)) {
+        errors.push({
+          nodeId: circ.id,
+          rule: '3F_UNDER_2P',
+          message: `Circuito trifásico ${circ.name || 'sin nombre'} bajo diferencial 2P ${upstreamDiff.name || ''}`,
+          severity: 'error',
+        });
+      }
+    }
+
+    // Regla 4 — Circuito sin datos obligatorios
+    const requiredCircuitFields: Array<{ key: keyof PanelNode; label: string }> = [
+      { key: 'power', label: 'potencia' },
+      { key: 'cableType', label: 'tipo cable' },
+      { key: 'material', label: 'material' },
+      { key: 'installMethod', label: 'método instalación' },
+      { key: 'length', label: 'longitud' },
+    ];
+    for (const circ of circuits) {
+      const missing = requiredCircuitFields
+        .filter((f) => {
+          const v = circ[f.key];
+          return v === null || v === undefined || v === 0;
+        })
+        .map((f) => f.label);
+      if (missing.length > 0) {
+        warnings.push({
+          nodeId: circ.id,
+          rule: 'CIRCUIT_INCOMPLETE',
+          message: `Circuito ${circ.name || 'sin nombre'}: faltan datos (${missing.join(', ')})`,
+          severity: 'warning',
+        });
+      }
+    }
+
+    // Regla 5 — Diferencial sin circuitos
+    for (const diff of differentials) {
+      const hasCircuitDescendant = this.hasDescendantOfType(
+        diff.id,
+        'CIRCUITO',
+        nodeMap,
+        nodes,
+      );
+      if (!hasCircuitDescendant) {
+        info.push({
+          nodeId: diff.id,
+          rule: 'DIFF_EMPTY',
+          message: `Diferencial ${diff.name || 'sin nombre'} sin circuitos asignados`,
+          severity: 'info',
+        });
+      }
+    }
+
+    return { errors, warnings, info };
+  }
+
+  /** Busca el AUTOMATICO o IGA más cercano aguas arriba */
+  private findUpstreamProtection(
+    node: PanelNode,
+    nodeMap: Map<string, PanelNode>,
+  ): PanelNode | null {
+    let currentId = node.parentId;
+    const visited = new Set<string>();
+    while (currentId) {
+      if (visited.has(currentId)) break;
+      visited.add(currentId);
+      const parent = nodeMap.get(currentId);
+      if (!parent) break;
+      if (parent.nodeType === 'AUTOMATICO' || parent.nodeType === 'IGA') {
+        return parent;
+      }
+      currentId = parent.parentId;
+    }
+    return null;
+  }
+
+  /** Busca el nodo más cercano de un tipo aguas arriba */
+  private findUpstreamOfType(
+    node: PanelNode,
+    targetType: string,
+    nodeMap: Map<string, PanelNode>,
+  ): PanelNode | null {
+    let currentId = node.parentId;
+    const visited = new Set<string>();
+    while (currentId) {
+      if (visited.has(currentId)) break;
+      visited.add(currentId);
+      const parent = nodeMap.get(currentId);
+      if (!parent) break;
+      if (parent.nodeType === targetType) return parent;
+      currentId = parent.parentId;
+    }
+    return null;
+  }
+
+  /** Comprueba si polos es "2P" (acepta "2P" o "2") */
+  private isPolos2P(polos: string | null): boolean {
+    if (!polos) return false;
+    return polos === '2P' || polos === '2';
+  }
+
+  /** Comprueba si un nodo tiene descendientes de un tipo dado */
+  private hasDescendantOfType(
+    parentId: string,
+    targetType: string,
+    nodeMap: Map<string, PanelNode>,
+    allNodes: PanelNode[],
+  ): boolean {
+    const children = allNodes.filter((n) => n.parentId === parentId);
+    for (const child of children) {
+      if (child.nodeType === targetType) return true;
+      if (this.hasDescendantOfType(child.id, targetType, nodeMap, allNodes)) {
+        return true;
+      }
+    }
+    return false;
   }
 
   /** Mapear designación de cable → tipo aislamiento para el motor */
