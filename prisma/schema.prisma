@@ -141,6 +141,8 @@ model Installation {
   userId   String
   status   InstallationStatus @default(DRAFT)
 
+  panelVersion    String    @default("v1")  // "v1" = cuadro simple, "v2" = cuadro avanzado
+
   // ═══ DATOS DEL TITULAR ═══
   holderDocType       String?   @default("NIF") // NIF, NIE, PASAPORTE
   titularNif          String?

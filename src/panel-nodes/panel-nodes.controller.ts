@@ -134,6 +134,30 @@ export class PanelNodesController {
   }
 
   /**
+   * POST /api/v1/installations/:installationId/panel-nodes/upgrade-to-v2
+   * Migra v1 → v2 y cambia panelVersion a 'v2'.
+   */
+  @Post('upgrade-to-v2')
+  upgradeToV2(
+    @Param('installationId') installationId: string,
+    @CurrentUser() user: SafeUser,
+  ): Promise<{ nodes: PanelNode[]; panelVersion: string }> {
+    return this.panelNodesService.upgradeToV2(installationId, user.tenantId);
+  }
+
+  /**
+   * POST /api/v1/installations/:installationId/panel-nodes/downgrade-to-v1
+   * Borra PanelNodes y vuelve a v1.
+   */
+  @Post('downgrade-to-v1')
+  downgradeToV1(
+    @Param('installationId') installationId: string,
+    @CurrentUser() user: SafeUser,
+  ): Promise<{ panelVersion: string }> {
+    return this.panelNodesService.downgradeToV1(installationId, user.tenantId);
+  }
+
+  /**
    * PUT /api/v1/installations/:installationId/panel-nodes
    * Reemplazar todo el arbol (bulk).
    */

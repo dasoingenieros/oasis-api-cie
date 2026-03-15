@@ -412,6 +412,42 @@ export class PanelNodesService {
   }
 
   /**
+   * Migra v1 → v2 y cambia panelVersion a 'v2'.
+   */
+  async upgradeToV2(
+    installationId: string,
+    tenantId: string,
+  ): Promise<{ nodes: PanelNode[]; panelVersion: string }> {
+    const nodes = await this.migrateV1toV2(installationId, tenantId);
+
+    await this.prisma.installation.update({
+      where: { id: installationId },
+      data: { panelVersion: 'v2' },
+    });
+
+    return { nodes, panelVersion: 'v2' };
+  }
+
+  /**
+   * Borra PanelNodes y vuelve a panelVersion 'v1'.
+   */
+  async downgradeToV1(
+    installationId: string,
+    tenantId: string,
+  ): Promise<{ panelVersion: string }> {
+    await this.prisma.panelNode.deleteMany({
+      where: { installationId, tenantId },
+    });
+
+    await this.prisma.installation.update({
+      where: { id: installationId },
+      data: { panelVersion: 'v1' },
+    });
+
+    return { panelVersion: 'v1' };
+  }
+
+  /**
    * Calcula todos los circuitos del árbol PanelNode v2.
    * 1. Lee el árbol + datos de Installation
    * 2. Mapea nodos CIRCUITO → CircuitInput del motor
