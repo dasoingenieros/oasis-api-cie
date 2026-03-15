@@ -8,6 +8,14 @@ import { CreatePanelNodeDto } from './dto/create-panel-node.dto';
 import { UpdatePanelNodeDto } from './dto/update-panel-node.dto';
 import { MovePanelNodeDto } from './dto/move-panel-node.dto';
 import type { PanelNode, PanelNodeType } from '@prisma/client';
+import {
+  calculateInstallation,
+  calculateDIVoltageDrop,
+  getProtectionConductorSection,
+  ENGINE_VERSION,
+  NORM_VERSION,
+} from '@daso/electrical-engine';
+import type { CircuitInput, CircuitCode, DIInput } from '@daso/electrical-engine';
 
 @Injectable()
 export class PanelNodesService {
@@ -388,6 +396,189 @@ export class PanelNodesService {
 
       return created;
     });
+  }
+
+  /**
+   * Calcula todos los circuitos del árbol PanelNode v2.
+   * 1. Lee el árbol + datos de Installation
+   * 2. Mapea nodos CIRCUITO → CircuitInput del motor
+   * 3. Ejecuta calculateInstallation
+   * 4. Guarda resultados en calcResults de cada nodo
+   * 5. Calcula CdT DI y guarda en calcResults del IGA
+   * 6. Devuelve el árbol actualizado
+   */
+  async calculateTreeV2(
+    installationId: string,
+    tenantId: string,
+  ): Promise<PanelNode[]> {
+    // 1. Leer árbol completo
+    const nodes = await this.prisma.panelNode.findMany({
+      where: { installationId, tenantId },
+      orderBy: { position: 'asc' },
+    });
+
+    if (nodes.length === 0) {
+      throw new NotFoundException('No hay nodos en el cuadro v2 para calcular');
+    }
+
+    const circuitNodes = nodes.filter((n) => n.nodeType === 'CIRCUITO');
+    if (circuitNodes.length === 0) {
+      throw new BadRequestException('No hay circuitos definidos para calcular');
+    }
+
+    // 2. Leer Installation para tensión y tipo
+    const installation = await this.prisma.installation.findFirst({
+      where: { id: installationId, tenantId },
+    });
+    if (!installation) {
+      throw new NotFoundException('Instalación no encontrada');
+    }
+
+    const inst = installation as any;
+    const defaultVoltage = inst.supplyVoltage ?? 230;
+    const isVivienda = ['VIVIENDA_BASICA', 'VIVIENDA_ELEVADA'].includes(
+      inst.supplyType ?? '',
+    );
+
+    // 3. Mapear circuitos → CircuitInput
+    const inputs: CircuitInput[] = circuitNodes.map((node) =>
+      this.mapPanelNodeToEngineInput(node, defaultVoltage, isVivienda),
+    );
+
+    // 4. Ejecutar motor
+    const result = await calculateInstallation(inputs);
+
+    // 5. Guardar calcResults en cada nodo CIRCUITO
+    const resultMap = new Map(result.circuits.map((r) => [r.id, r]));
+
+    await this.prisma.$transaction(
+      circuitNodes.map((node) => {
+        const circResult = resultMap.get(node.id);
+        return this.prisma.panelNode.update({
+          where: { id: node.id },
+          data: {
+            calcResults: circResult
+              ? JSON.parse(JSON.stringify(circResult))
+              : { error: 'Sin resultado del motor' },
+          },
+        });
+      }),
+    );
+
+    // 6. Calcular supply (CdT DI + PE) y guardar en IGA
+    const igaNode = nodes.find(
+      (n) => n.nodeType === 'IGA' && n.parentId === null,
+    );
+
+    if (igaNode) {
+      const voltage = defaultVoltage;
+      const phaseSystem: 'single' | 'three' =
+        voltage === 400 || voltage === 380 ? 'three' : 'single';
+      const userIgaA = igaNode.calibreA ?? inst.igaNominal ?? 25;
+      const igaDerivedPowerW =
+        phaseSystem === 'three'
+          ? Math.sqrt(3) * voltage * userIgaA
+          : voltage * userIgaA;
+      const designPowerW = (inst.potMaxAdmisible ?? igaDerivedPowerW / 1000) * 1000;
+      const diSectionMm2 = inst.seccionDi ?? 6;
+      const diLengthM = inst.longitudDi ?? 10;
+      const materialDi: 'Cu' | 'Al' = inst.materialDi === 'AL' ? 'Al' : 'Cu';
+
+      const diInput: DIInput = {
+        contractedPowerW: designPowerW,
+        phaseSystem,
+        powerFactor: 0.9,
+        conductorMaterial: materialDi,
+        sectionMm2: diSectionMm2,
+        lengthM: diLengthM,
+        voltageV: voltage,
+      };
+      const cdtResult = calculateDIVoltageDrop(diInput);
+      const peMm2 = getProtectionConductorSection(diSectionMm2);
+
+      // Potencia total instalada (suma de circuitos)
+      const totalInstalledW = circuitNodes.reduce(
+        (sum, n) => sum + (n.power ?? 0),
+        0,
+      );
+
+      await this.prisma.panelNode.update({
+        where: { id: igaNode.id },
+        data: {
+          calcResults: {
+            engineVersion: ENGINE_VERSION,
+            normVersion: NORM_VERSION,
+            designPowerW,
+            totalInstalledW,
+            igaRatingA: userIgaA,
+            di: {
+              sectionMm2: diSectionMm2,
+              materialDi: materialDi,
+              lengthM: diLengthM,
+              voltageDropPct: cdtResult.voltageDropPct,
+              voltageDropV: cdtResult.voltageDropV,
+              cdtLimitPct: cdtResult.cdtLimitPct,
+              cdtCompliant: cdtResult.cdtCompliant,
+              nominalCurrentA: cdtResult.nominalCurrentA,
+            },
+            protectionConductorMm2: peMm2,
+            allCircuitsValid: result.isValid,
+            summary: {
+              totalPowerW: result.summary.totalPowerW,
+              maxSectionMm2: result.summary.maxSectionMm2,
+              maxVoltageDropPct: result.summary.maxVoltageDropPct,
+            },
+          },
+        },
+      });
+    }
+
+    // 7. Devolver árbol actualizado
+    return this.prisma.panelNode.findMany({
+      where: { installationId, tenantId },
+      orderBy: { position: 'asc' },
+    });
+  }
+
+  /** Mapear designación de cable → tipo aislamiento para el motor */
+  private mapInsulationType(designation: string): 'PVC' | 'XLPE' | 'EPR' {
+    switch (designation) {
+      case 'H07V-K': case 'H07V-U': case 'H07Z1-K': case 'PVC': return 'PVC';
+      case 'RV-K': case 'RZ1-K': case 'XLPE': return 'XLPE';
+      case 'EPR': return 'EPR';
+      default: return 'PVC';
+    }
+  }
+
+  /** Mapear PanelNode CIRCUITO → CircuitInput del motor */
+  private mapPanelNodeToEngineInput(
+    node: PanelNode,
+    defaultVoltage: number,
+    isVivienda: boolean,
+  ): CircuitInput {
+    const conductorMaterial = node.material === 'AL' ? 'Al' : 'Cu';
+    const phaseSystem = node.phases === '3F' ? 'three' : 'single';
+    const code: CircuitCode = 'CUSTOM';
+
+    return {
+      id: node.id,
+      label: node.name ?? 'Sin nombre',
+      code,
+      phaseSystem,
+      loadPowerW: node.power ?? 0,
+      powerFactor: node.cosPhi ?? 1,
+      simultaneityFactor: 1,
+      loadFactor: 1,
+      conductorMaterial,
+      insulationType: this.mapInsulationType(node.cableType ?? 'H07V-K'),
+      installationMethod: (node.installMethod ?? 'B1') as any,
+      lengthM: node.length ?? 1,
+      ambientTempC: 30,
+      groupingCircuits: 1,
+      voltageV: node.voltage ?? defaultVoltage,
+      upstreamCdtPct: 0,
+      loadType: node.loadType ?? undefined,
+    };
   }
 
   // --- Helpers privados ---

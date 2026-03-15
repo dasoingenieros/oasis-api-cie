@@ -93,6 +93,21 @@ export class PanelNodesController {
   }
 
   /**
+   * POST /api/v1/installations/:installationId/panel-nodes/calculate
+   * Calcula todos los circuitos del árbol v2.
+   */
+  @Post('calculate')
+  calculateTree(
+    @Param('installationId') installationId: string,
+    @CurrentUser() user: SafeUser,
+  ): Promise<PanelNode[]> {
+    return this.panelNodesService.calculateTreeV2(
+      installationId,
+      user.tenantId,
+    );
+  }
+
+  /**
    * POST /api/v1/installations/:installationId/panel-nodes/migrate-v1
    * Migra el cuadro v1 al v2. Idempotente.
    */
