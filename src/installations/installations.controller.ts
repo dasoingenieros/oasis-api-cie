@@ -56,6 +56,30 @@ export class InstallationsController {
   }
 
   /**
+   * GET /api/v1/installations/:id/field-status
+   * Devuelve el estado de completitud de campos para el perfil actual.
+   */
+  @Get(':id/field-status')
+  getFieldStatus(
+    @Param('id') id: string,
+    @CurrentUser() user: SafeUser,
+  ) {
+    return this.installationsService.getFieldStatus(id, user);
+  }
+
+  /**
+   * GET /api/v1/installations/:id/field-config
+   * Devuelve la configuracion de campos para el frontend.
+   */
+  @Get(':id/field-config')
+  getFieldConfig(
+    @Param('id') id: string,
+    @CurrentUser() user: SafeUser,
+  ) {
+    return this.installationsService.getFieldConfig(id, user);
+  }
+
+  /**
    * PUT /api/v1/installations/:id
    */
   @Put(':id')

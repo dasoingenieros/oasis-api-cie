@@ -182,11 +182,13 @@ export class DocumentsService {
     await this.checkCieLimit(tenantId);
 
     const installation = await this.verifyInstallation(installationId, tenantId, true);
+    const panelVersion = (installation as any).panelVersion ?? 'v1';
 
+    // v2 can generate MTD from PanelNode calcResults (no CalculationResult needed)
     const latestCalc = await this.prisma.calculationResult.findFirst({
       where: { installationId }, orderBy: { calculatedAt: 'desc' },
     });
-    if (!latestCalc) {
+    if (!latestCalc && panelVersion !== 'v2') {
       throw new BadRequestException('No hay resultados de cálculo. Ejecuta el cálculo primero.');
     }
     if (type === 'CERTIFICADO') {
@@ -201,10 +203,18 @@ export class DocumentsService {
     let fileExt: string;
 
     if (type === 'MEMORIA_TECNICA') {
-      buffer = await this.generateMtdPdfBuffer(installation, latestCalc);
+      if (panelVersion === 'v2') {
+        buffer = await this.generateMtdPdfBufferV2(installation, tenantId);
+      } else {
+        if (!latestCalc) throw new BadRequestException('No hay resultados de cálculo.');
+        buffer = await this.generateMtdPdfBuffer(installation, latestCalc);
+      }
       mimeType = 'application/pdf';
       fileExt = 'pdf';
     } else {
+      if (!latestCalc && panelVersion !== 'v2') {
+        throw new BadRequestException('No hay resultados de cálculo.');
+      }
       const html = this.buildHtmlFallback(installation, latestCalc, type);
       buffer = Buffer.from(html, 'utf-8');
       mimeType = 'text/html';
@@ -500,6 +510,176 @@ export class DocumentsService {
         breakerRatingA: result.breakerRatingA, nominalCurrentA: result.nominalCurrentA,
         admissibleCurrentA: result.correctedIzA,
         potMaxAdmKw: input?.loadPowerW ? input.loadPowerW / 1000 : undefined,
+      };
+    });
+
+    return generateMtdPdf(mtdData, mtdCircuits);
+  }
+
+  // ─── MTD PDF from PanelNode v2 ──────────────────────────────
+
+  private async generateMtdPdfBufferV2(installation: any, tenantId: string): Promise<Buffer> {
+    const inst = installation;
+    const installationId = inst.id;
+
+    // Fetch all panel nodes
+    const panelNodes = await this.prisma.panelNode.findMany({
+      where: { installationId, tenantId },
+      orderBy: { position: 'asc' },
+    });
+
+    if (panelNodes.length === 0) {
+      throw new BadRequestException('No hay nodos en el cuadro v2. Configura el cuadro eléctrico primero.');
+    }
+
+    // Check that at least some circuits have calcResults
+    const circuitNodes = panelNodes.filter((n) => n.nodeType === 'CIRCUITO');
+    if (circuitNodes.length === 0) {
+      throw new BadRequestException('No hay circuitos definidos en el cuadro v2.');
+    }
+
+    const hasCalcResults = circuitNodes.some((n) => n.calcResults != null);
+    if (!hasCalcResults) {
+      throw new BadRequestException('No hay resultados de cálculo en v2. Ejecuta el cálculo del cuadro primero.');
+    }
+
+    // Build same mtdData as v1 (reuse same mapping from installation scalar fields)
+    const titularParts = [inst.titularTipoVia, inst.titularNombreVia, inst.titularNumero].filter(Boolean);
+    const titularExtra = [
+      inst.titularBloque ? `Bl.${inst.titularBloque}` : null,
+      inst.titularEscalera ? `Esc.${inst.titularEscalera}` : null,
+      inst.titularPiso ? `${inst.titularPiso}º` : null,
+      inst.titularPuerta ? inst.titularPuerta : null,
+    ].filter(Boolean);
+    const titularDireccion = [titularParts.join(' '), titularExtra.join(' ')].filter(Boolean).join(', ') || '';
+
+    const emplazParts = [inst.emplazTipoVia, inst.emplazNombreVia, inst.emplazNumero].filter(Boolean);
+    const emplazExtra = [
+      inst.emplazBloque ? `Bl.${inst.emplazBloque}` : null,
+      inst.emplazEscalera ? `Esc.${inst.emplazEscalera}` : null,
+      inst.emplazPiso ? `${inst.emplazPiso}º` : null,
+      inst.emplazPuerta ? inst.emplazPuerta : null,
+    ].filter(Boolean);
+    const emplazDireccion = [emplazParts.join(' '), emplazExtra.join(' ')].filter(Boolean).join(', ') || inst.address || '';
+
+    const empresaParts = [inst.empresaTipoVia, inst.empresaNombreVia, inst.empresaNumero].filter(Boolean);
+    const empresaDomicilio = empresaParts.join(' ') || '';
+
+    const memoriaPorMap: Record<string, string> = {
+      NUEVA: 'N', MODIFICACION: 'M', AMPLIACION: 'A',
+      'Nueva': 'N', 'Modificación': 'M', 'Ampliación con o sin modif.': 'A',
+    };
+    const situacionMap: Record<string, string> = { INTERIOR: 'EN INTERIOR', FACHADA: 'EN FACHADA' };
+
+    const mtdData: MtdInstallationData = {
+      titularNif: inst.titularNif, titularNombre: inst.titularNombre || inst.titularName,
+      titularApellido1: inst.titularApellido1, titularApellido2: inst.titularApellido2,
+      titularDireccion, titularLocalidad: inst.titularLocalidad, titularCp: inst.titularCp,
+      emplazDireccion, emplazLocalidad: inst.emplazLocalidad, emplazCp: inst.emplazCp,
+      usoInstalacion: inst.tipoInstalacionCie || inst.usoInstalacion, tension: inst.supplyVoltage || 230,
+      gradoElectrificacion: inst.gradoElectrificacion,
+      memoriaPor: memoriaPorMap[inst.tipoActuacion] || 'N',
+      superficieM2: inst.superficieM2, puntoConexion: inst.puntoConexion,
+      tipoAcometida: inst.tipoAcometida, seccionAcometida: inst.seccionAcometida,
+      materialAcometida: inst.materialAcometida,
+      tipoCgp: inst.tipoCgp, inBaseCgp: inst.inBaseCgp, inCartuchoCgp: inst.inCartuchoCgp,
+      seccionLga: inst.seccionLga, materialLga: inst.materialLga,
+      longitudLga: inst.longitudLga, aislamientoLga: inst.aislamientoLga,
+      seccionDi: inst.seccionDi, materialDi: inst.materialDi,
+      longitudDi: inst.longitudDi, numDerivaciones: inst.numDerivaciones || 1,
+      aislamientoDi: inst.aislamientoDi, tipoInstalacionDi: inst.tipoInstalacionDi,
+      igmNominal: inst.igaNominal, poderCorte: inst.igaPoderCorte,
+      tipoModuloMedida: inst.tipoModuloMedida,
+      situacionModulo: situacionMap[inst.situacionModulo] || inst.situacionModulo,
+      igaNominal: inst.igaNominal, diferencialNominal: inst.diferencialNominal,
+      diferencialSensibilidad: inst.diferencialSensibilidad,
+      tipoElectrodos: inst.tipoElectrodos, seccionLineaEnlace: inst.seccionLineaEnlace,
+      seccionCondProteccion: inst.seccionCondProteccion,
+      supplyType: inst.supplyType, potMaxAdmisible: inst.potMaxAdmisible,
+      presupuestoMateriales: inst.presupuestoMateriales,
+      presupuestoManoObra: inst.presupuestoManoObra, presupuestoTotal: inst.presupuestoTotal,
+      tipoAutor: inst.tipoAutor || 'INSTALADOR',
+      instaladorNombre: inst.installer?.nombre || inst.instaladorNombre || inst.installerName,
+      instaladorCertNum: inst.installer?.certNum || inst.instaladorCertNum,
+      instaladorDomicilio: empresaDomicilio,
+      instaladorNum: inst.empresaNumero, instaladorLocalidad: inst.empresaLocalidad,
+      instaladorCp: inst.empresaCp, instaladorTelefono: inst.empresaTelefono || inst.empresaMovil,
+      instaladorEmail: inst.empresaEmail,
+      tecnicoNombre: inst.technician?.nombre,
+      tecnicoColegiado: inst.technician?.numColegiado,
+      tecnicoDomicilio: inst.technician?.direccion,
+      tecnicoLocalidad: inst.technician?.localidad,
+      tecnicoCp: inst.technician?.cp,
+      tecnicoTelefono: inst.technician?.telefono,
+      tecnicoEmail: inst.technician?.email,
+      tecnicoColegio: inst.technician?.colegioOficial,
+      memoriaDescriptiva: inst.memoriaDescriptiva,
+      firmaLugar: inst.firmaLugar || 'MADRID', esquemaDistribucion: inst.esquemaDistribucion,
+      phaseSystem: (inst.supplyVoltage === 400 || inst.supplyVoltage === 380) ? 'three' : 'single',
+      cdtDi: inst.cdtDi ?? undefined, contadorUbicacion: inst.contadorUbicacion,
+    };
+
+    // Build IGA data from PanelNode (override installation-level if present)
+    const igaNode = panelNodes.find((n) => n.nodeType === 'IGA' && n.parentId === null);
+    if (igaNode) {
+      if (igaNode.calibreA) mtdData.igaNominal = igaNode.calibreA;
+      if (igaNode.calibreA) mtdData.igmNominal = igaNode.calibreA;
+      if (igaNode.poderCorteKa) mtdData.poderCorte = igaNode.poderCorteKa;
+      // CdT DI from IGA calcResults
+      const igaCalc = igaNode.calcResults as any;
+      if (igaCalc?.di?.voltageDropPct != null) mtdData.cdtDi = igaCalc.di.voltageDropPct;
+    }
+
+    // Build diferencial data from first DIFERENCIAL node
+    const diffNode = panelNodes.find((n) => n.nodeType === 'DIFERENCIAL');
+    if (diffNode) {
+      if (diffNode.calibreA) mtdData.diferencialNominal = diffNode.calibreA;
+      if (diffNode.sensitivityMa) mtdData.diferencialSensibilidad = diffNode.sensitivityMa;
+    }
+
+    // Map insulation type designation to category
+    const mapInsulationType = (designation: string | null): string => {
+      switch (designation) {
+        case 'H07V-K': case 'H07V-U': case 'H07Z1-K': case 'PVC': return 'PVC';
+        case 'RV-K': case 'RZ1-K': case 'XLPE': return 'XLPE';
+        case 'EPR': return 'EPR';
+        default: return 'PVC';
+      }
+    };
+
+    // Build MtdCircuitData from CIRCUITO nodes + their calcResults
+    const mtdCircuits: MtdCircuitData[] = circuitNodes.map((node) => {
+      const cr = node.calcResults as any;
+      const phases = node.phases === '3F' ? 3 : 1;
+      const material = node.material === 'AL' ? 'AL' : 'CU';
+
+      // Find parent AUTOMATICO for breaker info (if not in calcResults)
+      let breakerRatingA = cr?.breakerRatingA ?? null;
+      let breakerCurve = cr?.breakerCurve ?? 'C';
+      if (!breakerRatingA) {
+        const parentNode = panelNodes.find((n) => n.id === node.parentId);
+        if (parentNode?.nodeType === 'AUTOMATICO') {
+          breakerRatingA = parentNode.calibreA;
+          breakerCurve = parentNode.curva || breakerCurve;
+        }
+      }
+
+      return {
+        code: '', // v2 nodes don't have a separate code field
+        name: node.name || '',
+        power: node.power ?? 0,
+        voltage: node.voltage ?? 230,
+        phases,
+        length: node.length ?? 0,
+        cableType: material,
+        insulationType: mapInsulationType(node.cableType),
+        installMethod: node.installMethod || 'A1',
+        calculatedSection: cr?.sectionMm2 ?? node.section ?? undefined,
+        voltageDrop: cr?.voltageDropPct ?? undefined,
+        breakerRatingA: breakerRatingA ?? undefined,
+        nominalCurrentA: cr?.nominalCurrentA ?? undefined,
+        admissibleCurrentA: cr?.correctedIzA ?? undefined,
+        potMaxAdmKw: node.power ? node.power / 1000 : undefined,
       };
     });
 

@@ -9,6 +9,13 @@ import { Installation, InstallationStatus } from '@prisma/client';
 import { CreateInstallationDto } from './dto/create-installation.dto';
 import { UpdateInstallationDto } from './dto/update-installation.dto';
 import type { SafeUser } from '../users/users.service';
+import {
+  getExpedienteProfile,
+  getFieldsForProfile,
+  computeFieldStatus,
+  computeFieldConfig,
+  type ExpedienteProfile,
+} from './field-config';
 
 @Injectable()
 export class InstallationsService {
@@ -25,7 +32,7 @@ export class InstallationsService {
 
     const autoFill: Record<string, any> = {};
 
-    // Datos empresa desde tenant
+    // Datos empresa desde tenant (grupo E)
     if (tenant) {
       if (tenant.empresaNif) autoFill.empresaNif = tenant.empresaNif;
       if (tenant.empresaNombre) autoFill.empresaNombre = tenant.empresaNombre;
@@ -84,17 +91,63 @@ export class InstallationsService {
       }
     }
 
+    // ── Defaults inteligentes (grupo B) desde field-config ──
+    const profile = getExpedienteProfile({
+      installationType: dto.installationType,
+      expedienteType: dto.expedienteType,
+    });
+    const fields = getFieldsForProfile(profile);
+    const defaults: Record<string, any> = {};
+    for (const field of fields) {
+      if (field.group === 'B' && field.defaultValue !== undefined) {
+        defaults[field.name] = field.defaultValue;
+      }
+    }
+
     return this.prisma.installation.create({
       data: {
-        ...autoFill,       // primero auto-relleno
+        ...defaults,       // primero defaults grupo B (mas baja prioridad)
+        ...autoFill,       // auto-relleno tenant/installer (grupo E)
         ...wizardMapped,   // mapeos wizard→legacy
-        ...(dto as any),   // luego DTO (sobrescribe si el usuario envió algo)
+        ...(dto as any),   // luego DTO (sobrescribe si el usuario envio algo)
         userId: user.id,
         tenantId: user.tenantId,
         status: InstallationStatus.DRAFT,
       },
       include: { circuits: true },
     });
+  }
+
+  /**
+   * Devuelve el estado de completitud de campos para una instalacion.
+   * Usado por GET /installations/:id/field-status
+   */
+  async getFieldStatus(id: string, user: SafeUser) {
+    const installation = await this.findOne(id, user);
+    const profile = getExpedienteProfile(installation);
+    const fields = getFieldsForProfile(profile);
+    const status = computeFieldStatus(installation as any, fields);
+
+    return {
+      profile,
+      ...status,
+    };
+  }
+
+  /**
+   * Devuelve la configuracion de campos para el frontend.
+   * Usado por GET /installations/:id/field-config
+   */
+  async getFieldConfig(id: string, user: SafeUser) {
+    const installation = await this.findOne(id, user);
+    const profile = getExpedienteProfile(installation);
+    const fields = getFieldsForProfile(profile);
+    const sections = computeFieldConfig(installation as any, fields);
+
+    return {
+      profile,
+      sections,
+    };
   }
 
   /**
