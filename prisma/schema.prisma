@@ -56,6 +56,12 @@ model Tenant {
   consentLogs   ConsentLog[]
   installers    Installer[]
   technicians   Technician[]
+
+  // Documentos empresa
+  certificadoEmpresaUrl    String?
+  certificadoEmpresaName   String?
+  anexoUsuarioUrl          String?
+  anexoUsuarioName         String?
 }
 
 // ── User ────────────────────────────────────────────────────────────────────
@@ -212,6 +218,7 @@ model Installation {
 
   // ═══ CGP ═══
   tipoCgp       String?
+  esquemaCgp    String?
   inBaseCgp     Float?
   inCartuchoCgp Float?
 
@@ -331,6 +338,7 @@ model Installation {
   unifilarLayout         UnifilarLayout?
   tramitacionExpedientes TramitacionExpediente[]
   feedbackReports        FeedbackReport[]
+  uploadedDocuments      InstallationDocument[]
 
   // Cuadro Eléctrico v2 (árbol)
   panelNodes      PanelNode[]
@@ -803,6 +811,25 @@ model WaitlistEntry {
 
   @@index([tenantId])
   @@index([installationType])
+}
+
+// ── Documentos adjuntos de instalación ───────────────────────────────────────
+
+model InstallationDocument {
+  id              String   @id @default(cuid())
+  tenantId        String
+  installationId  String
+  fileName        String
+  fileUrl         String
+  fileSize        Int
+  mimeType        String
+  description     String?
+  uploadedAt      DateTime @default(now())
+
+  installation    Installation @relation(fields: [installationId], references: [id], onDelete: Cascade)
+
+  @@index([installationId])
+  @@index([tenantId])
 }
 
 // ============================================================

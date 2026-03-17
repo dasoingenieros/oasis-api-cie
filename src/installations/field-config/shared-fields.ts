@@ -1,12 +1,28 @@
-// src/installations/field-config/vivienda-nueva.ts
-// Configuracion completa de campos para perfil VIVIENDA_NUEVA (CAM).
-// Basado en docs/H7_CAMPOS_VIVIENDA_NUEVA.md — TAREA 5.
-// Los campos de grupo D (no aplican) NO se incluyen en el array.
+// src/installations/field-config/shared-fields.ts
+// Secciones de campos comunes reutilizables por todos los perfiles.
+// Cada perfil importa las secciones que necesita y las combina con su seccion tecnico.
 
 import { FieldDef } from './field-config';
 
-export const VIVIENDA_NUEVA_FIELDS: FieldDef[] = [
-  // ═══ TITULAR ═══
+// ═══ UTILIDAD ═══
+
+/** Reemplaza un campo por nombre dentro de un array de FieldDef. Devuelve copia. */
+export function replaceField(
+  fields: FieldDef[],
+  name: string,
+  overrides: Partial<FieldDef>,
+): FieldDef[] {
+  return fields.map((f) => (f.name === name ? { ...f, ...overrides } : f));
+}
+
+/** Elimina campos por nombre. Devuelve copia. */
+export function removeFields(fields: FieldDef[], names: string[]): FieldDef[] {
+  return fields.filter((f) => !names.includes(f.name));
+}
+
+// ═══ TITULAR ═══
+
+export const TITULAR_FIELDS: FieldDef[] = [
   {
     name: 'holderDocType',
     group: 'B',
@@ -160,9 +176,12 @@ export const VIVIENDA_NUEVA_FIELDS: FieldDef[] = [
     atLeastOneOf: 'titular_phone',
     requiredForDocs: ['CIE', 'SOLICITUD_BT'],
   },
-  // representanteNombre, representanteNif → grupo D (no aplica en vivienda persona fisica)
+];
 
-  // ═══ EMPLAZAMIENTO ═══
+// ═══ EMPLAZAMIENTO ═══
+
+/** Emplazamiento base (direccion). No incluye superficieM2, cups, contadorUbicacion. */
+export const EMPLAZAMIENTO_DIRECCION_FIELDS: FieldDef[] = [
   {
     name: 'emplazTipoVia',
     group: 'A',
@@ -249,6 +268,10 @@ export const VIVIENDA_NUEVA_FIELDS: FieldDef[] = [
     inputType: 'text',
     requiredForDocs: ['MTD', 'CIE', 'SOLICITUD_BT'],
   },
+];
+
+/** Superficie, CUPS, contador — comunes pero con grupo variable para superficie */
+export const EMPLAZAMIENTO_EXTRAS_FIELDS: FieldDef[] = [
   {
     name: 'superficieM2',
     group: 'A',
@@ -276,150 +299,11 @@ export const VIVIENDA_NUEVA_FIELDS: FieldDef[] = [
     options: ['ARMARIO', 'LOCAL', 'CPM'],
     requiredForDocs: ['MTD', 'CIE'],
   },
+];
 
-  // ═══ DATOS TECNICOS ═══
-  {
-    name: 'tipoDocumentacion',
-    group: 'C',
-    section: 'tecnico',
-    label: 'Tipo documentacion',
-    calculatedBy: 'auto: MTD para vivienda (<100kW)',
-    requiredForDocs: ['CIE', 'SOLICITUD_BT'],
-  },
-  {
-    name: 'supplyType',
-    group: 'B',
-    section: 'tecnico',
-    label: 'Tipo suministro',
-    defaultValue: 'VIVIENDA_BASICA',
-    inputType: 'select',
-    options: ['VIVIENDA_BASICA', 'VIVIENDA_ELEVADA'],
-    requiredForDocs: ['MTD'],
-  },
-  {
-    name: 'supplyVoltage',
-    group: 'B',
-    section: 'tecnico',
-    label: 'Tension (V)',
-    defaultValue: 230,
-    inputType: 'select',
-    options: ['230', '400'],
-    requiredForDocs: ['MTD', 'CIE'],
-  },
-  {
-    name: 'tipoActuacion',
-    group: 'B',
-    section: 'tecnico',
-    label: 'Tipo actuacion',
-    defaultValue: 'Nueva',
-    inputType: 'select',
-    options: ['Nueva', 'Ampliacion con o sin modif.', 'Modificacion'],
-    requiredForDocs: ['MTD', 'CIE', 'SOLICITUD_BT'],
-  },
-  {
-    name: 'usoInstalacion',
-    group: 'B',
-    section: 'tecnico',
-    label: 'Uso instalacion',
-    defaultValue: 'Vivienda',
-    inputType: 'text',
-    requiredForDocs: ['MTD', 'SOLICITUD_BT'],
-  },
-  {
-    name: 'tipoInstalacionCie',
-    group: 'B',
-    section: 'tecnico',
-    label: 'Tipo instalacion CIE',
-    defaultValue: 'Vivienda',
-    inputType: 'select',
-    options: [
-      'Vivienda',
-      'Local comercial',
-      'Oficina',
-      'Nave industrial',
-      'Garaje',
-      'Alumbrado exterior',
-      'IRVE',
-      'Autoconsumo',
-      'Piscina',
-      'Local de publica concurrencia',
-      'Instalacion temporal',
-    ],
-    requiredForDocs: ['MTD', 'CIE', 'SOLICITUD_BT'],
-  },
-  {
-    name: 'aforo',
-    group: 'B',
-    section: 'tecnico',
-    label: 'Aforo',
-    defaultValue: 'N/A',
-    inputType: 'text',
-    requiredForDocs: ['CIE'],
-  },
-  {
-    name: 'installationType',
-    group: 'B',
-    section: 'tecnico',
-    label: 'Tipo instalacion (wizard)',
-    defaultValue: 'vivienda',
-    inputType: 'text',
-  },
-  {
-    name: 'expedienteType',
-    group: 'B',
-    section: 'tecnico',
-    label: 'Tipo expediente',
-    defaultValue: 'NUEVA',
-    inputType: 'text',
-  },
-  {
-    name: 'referencia',
-    group: 'A',
-    section: 'tecnico',
-    label: 'Referencia interna',
-    inputType: 'text',
-    optional: true,
-  },
-  {
-    name: 'esquemaDistribucion',
-    group: 'B',
-    section: 'tecnico',
-    label: 'Esquema distribucion',
-    defaultValue: 'TT',
-    inputType: 'select',
-    options: ['TT', 'TN-S', 'TN-C', 'TN-C-S', 'IT'],
-    requiredForDocs: ['MTD', 'CIE'],
-  },
-  // gradoElectrificacion → grupo C (calculado)
-  {
-    name: 'gradoElectrificacion',
-    group: 'C',
-    section: 'tecnico',
-    label: 'Grado electrificacion',
-    calculatedBy: 'motor: superficie + cargas',
-    requiredForDocs: ['MTD', 'CIE'],
-  },
-  {
-    name: 'seccionDi',
-    group: 'B',
-    section: 'tecnico',
-    label: 'Seccion DI (mm2)',
-    defaultValue: 6,
-    inputType: 'number',
-    requiredForDocs: ['MTD', 'CIE'],
-  },
-  {
-    name: 'potMaxAdmisible',
-    group: 'C',
-    section: 'tecnico',
-    label: 'Potencia maxima admisible (kW)',
-    calculatedBy: 'formula: V x IGA',
-    requiredForDocs: ['CIE'],
-  },
-  // temporalidad, numRegistroExistente, potAmpliacion, potOriginal → grupo D (no aplica)
-  // contractedPower → grupo D (legacy)
+// ═══ ACOMETIDA ═══
 
-  // ═══ ACOMETIDA ═══
+export const ACOMETIDA_FIELDS: FieldDef[] = [
   {
     name: 'puntoConexion',
     group: 'B',
@@ -458,8 +342,11 @@ export const VIVIENDA_NUEVA_FIELDS: FieldDef[] = [
     options: ['CU', 'AL'],
     requiredForDocs: ['MTD'],
   },
+];
 
-  // ═══ CGP ═══
+// ═══ CGP ═══
+
+export const CGP_FIELDS: FieldDef[] = [
   {
     name: 'tipoCgp',
     group: 'B',
@@ -496,8 +383,11 @@ export const VIVIENDA_NUEVA_FIELDS: FieldDef[] = [
     calculatedBy: 'motor: desde potencia',
     requiredForDocs: ['MTD'],
   },
+];
 
-  // ═══ LGA ═══
+// ═══ LGA ═══
+
+export const LGA_FIELDS: FieldDef[] = [
   {
     name: 'seccionLga',
     group: 'C',
@@ -532,8 +422,11 @@ export const VIVIENDA_NUEVA_FIELDS: FieldDef[] = [
     calculatedBy: 'motor',
     requiredForDocs: ['MTD'],
   },
+];
 
-  // ═══ MODULO DE MEDIDA ═══
+// ═══ MODULO DE MEDIDA ═══
+
+export const MODULO_MEDIDA_FIELDS: FieldDef[] = [
   {
     name: 'tipoModuloMedida',
     group: 'B',
@@ -554,14 +447,17 @@ export const VIVIENDA_NUEVA_FIELDS: FieldDef[] = [
     options: ['INTERIOR', 'FACHADA'],
     requiredForDocs: ['MTD'],
   },
+];
 
-  // ═══ PROTECCIONES ═══
+// ═══ PROTECCIONES ═══
+
+export const PROTECCIONES_FIELDS: FieldDef[] = [
   {
     name: 'igaNominal',
     group: 'C',
     section: 'protecciones',
     label: 'IGA corriente nominal (A)',
-    calculatedBy: 'motor: P/(V x cosfi) → calibre normalizado',
+    calculatedBy: 'motor: P/(V x cosfi) -> calibre normalizado',
     requiredForDocs: ['MTD', 'CIE'],
   },
   {
@@ -597,8 +493,11 @@ export const VIVIENDA_NUEVA_FIELDS: FieldDef[] = [
     inputType: 'boolean',
     requiredForDocs: ['MTD', 'CIE'],
   },
+];
 
-  // ═══ PUESTA A TIERRA Y VERIFICACIONES ═══
+// ═══ PUESTA A TIERRA Y VERIFICACIONES ═══
+
+export const TIERRA_FIELDS: FieldDef[] = [
   {
     name: 'tipoElectrodos',
     group: 'B',
@@ -622,7 +521,7 @@ export const VIVIENDA_NUEVA_FIELDS: FieldDef[] = [
     group: 'C',
     section: 'tierra',
     label: 'Seccion conductor proteccion (mm2)',
-    calculatedBy: 'formula: si DI<=16→PE=DI, si DI>16→16mm2',
+    calculatedBy: 'formula: si DI<=16->PE=DI, si DI>16->16mm2',
     requiredForDocs: ['MTD'],
   },
   {
@@ -650,8 +549,11 @@ export const VIVIENDA_NUEVA_FIELDS: FieldDef[] = [
     optional: true,
     requiredForDocs: ['CIE'],
   },
+];
 
-  // ═══ EMPRESA INSTALADORA ═══
+// ═══ EMPRESA INSTALADORA ═══
+
+export const EMPRESA_FIELDS: FieldDef[] = [
   {
     name: 'empresaNif',
     group: 'E',
@@ -756,8 +658,11 @@ export const VIVIENDA_NUEVA_FIELDS: FieldDef[] = [
     autoFrom: 'tenant.empresaEmail',
     requiredForDocs: ['MTD', 'CIE', 'SOLICITUD_BT'],
   },
+];
 
-  // ═══ INSTALADOR / TECNICO ═══
+// ═══ INSTALADOR / TECNICO ═══
+
+export const INSTALADOR_FIELDS: FieldDef[] = [
   {
     name: 'instaladorNombre',
     group: 'E',
@@ -799,9 +704,11 @@ export const VIVIENDA_NUEVA_FIELDS: FieldDef[] = [
     label: 'Instalador',
     autoFrom: 'installer.id',
   },
-  // technicianId → grupo D (solo si tipoAutor=TECNICO, no aplica por defecto)
+];
 
-  // ═══ DISTRIBUIDORA (visible en datos guiados, auto-relleno desde tenant) ═══
+// ═══ DISTRIBUIDORA ═══
+
+export const DISTRIBUIDORA_FIELD: FieldDef[] = [
   {
     name: 'distribuidora',
     group: 'A',
@@ -810,20 +717,23 @@ export const VIVIENDA_NUEVA_FIELDS: FieldDef[] = [
     autoFrom: 'tenant.distribuidoraHab',
     inputType: 'select',
     options: [
-      '0021 - I-DE Redes Eléctricas Inteligentes',
-      '0022 - UFD Distribución Electricidad',
-      '0031 - E-Distribución Redes Digitales',
-      '0026 - Hidrocantábrico',
-      '0483 - Distribución Eléctrica del Tajuña',
-      '0494 - Distribución Eléctrica El Pozo',
-      '0314 - Hidroeléctrica Vega',
-      '0148 - Distribución Eléctrica Las Mercedes',
+      '0021 - I-DE Redes Electricas Inteligentes',
+      '0022 - UFD Distribucion Electricidad',
+      '0031 - E-Distribucion Redes Digitales',
+      '0026 - Hidrocantabrico',
+      '0483 - Distribucion Electrica del Tajuna',
+      '0494 - Distribucion Electrica El Pozo',
+      '0314 - Hidroelectrica Vega',
+      '0148 - Distribucion Electrica Las Mercedes',
       '0027 - Viesgo',
     ],
     requiredForDocs: ['CIE', 'SOLICITUD_BT'],
   },
+];
 
-  // ═══ PRESUPUESTO ═══
+// ═══ PRESUPUESTO ═══
+
+export const PRESUPUESTO_FIELDS: FieldDef[] = [
   {
     name: 'presupuestoMateriales',
     group: 'A',
@@ -848,8 +758,11 @@ export const VIVIENDA_NUEVA_FIELDS: FieldDef[] = [
     calculatedBy: 'formula: materiales + mano obra',
     requiredForDocs: ['MTD'],
   },
+];
 
-  // ═══ CERTIFICACION ═══
+// ═══ CERTIFICACION ═══
+
+export const CERTIFICACION_FIELDS: FieldDef[] = [
   {
     name: 'aplicaReeae',
     group: 'B',
@@ -859,7 +772,6 @@ export const VIVIENDA_NUEVA_FIELDS: FieldDef[] = [
     inputType: 'boolean',
     requiredForDocs: ['CIE'],
   },
-  // potLuminariasReeae → grupo D (no aplica vivienda)
   {
     name: 'aplicaItcBt51',
     group: 'B',
@@ -869,8 +781,41 @@ export const VIVIENDA_NUEVA_FIELDS: FieldDef[] = [
     inputType: 'boolean',
     requiredForDocs: ['CIE'],
   },
+];
 
-  // ═══ FIRMA ═══
+/** Certificacion con potLuminariasReeae (para LPC y locales) */
+export const CERTIFICACION_LPC_FIELDS: FieldDef[] = [
+  {
+    name: 'aplicaReeae',
+    group: 'B',
+    section: 'certificacion',
+    label: 'Aplica REEAE',
+    defaultValue: true,
+    inputType: 'boolean',
+    requiredForDocs: ['CIE'],
+  },
+  {
+    name: 'potLuminariasReeae',
+    group: 'A',
+    section: 'certificacion',
+    label: 'Potencia luminarias REEAE (W)',
+    inputType: 'number',
+    requiredForDocs: ['CIE'],
+  },
+  {
+    name: 'aplicaItcBt51',
+    group: 'B',
+    section: 'certificacion',
+    label: 'Aplica ITC-BT-51 (domotica)',
+    defaultValue: false,
+    inputType: 'boolean',
+    requiredForDocs: ['CIE'],
+  },
+];
+
+// ═══ FIRMA ═══
+
+export const FIRMA_FIELDS: FieldDef[] = [
   {
     name: 'firmaLugar',
     group: 'B',
@@ -888,9 +833,11 @@ export const VIVIENDA_NUEVA_FIELDS: FieldDef[] = [
     calculatedBy: 'auto: fecha actual al generar documento',
     requiredForDocs: ['MTD', 'CIE', 'SOLICITUD_BT'],
   },
-  // signerId → grupo D (firma digital, fase futura)
+];
 
-  // ═══ INFO ADICIONAL ═══
+// ═══ INFO ADICIONAL ═══
+
+export const INFO_FIELDS: FieldDef[] = [
   {
     name: 'infoAdicional',
     group: 'A',

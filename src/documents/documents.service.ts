@@ -284,9 +284,10 @@ export class DocumentsService {
     this.logger.log(`CIE generado: ${result.cieIdentificador}`);
 
     return {
-      xlsDoc: { id: xlsDoc.id, filename: xlsDoc.filename },
-      xlsBuffer: result.xlsBuffer,
-      pdfBuffer: result.pdfBuffer,
+      id: xlsDoc.id, installationId: xlsDoc.installationId,
+      type: xlsDoc.type, filename: xlsDoc.filename,
+      mimeType: xlsDoc.mimeType, sizeBytes: xlsDoc.sizeBytes,
+      isDraft: xlsDoc.isDraft, generatedAt: xlsDoc.generatedAt,
       cieIdentificador: result.cieIdentificador,
     };
   }

@@ -16,4 +16,8 @@ export class UpdateTenantProfileDto {
   @IsString() @IsOptional() empresaMovil?: string;
   @IsString() @IsOptional() empresaEmail?: string;
   @IsString() @IsOptional() distribuidoraHab?: string;
+  @IsString() @IsOptional() certificadoEmpresaUrl?: string;
+  @IsString() @IsOptional() certificadoEmpresaName?: string;
+  @IsString() @IsOptional() anexoUsuarioUrl?: string;
+  @IsString() @IsOptional() anexoUsuarioName?: string;
 }

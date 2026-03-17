@@ -32,22 +32,13 @@ export class DocumentsController {
     return this.documentsService.generate(installationId, req.user.tenantId, dto.type, req.user.id);
   }
 
-  /** CIE — ?format=xls|pdf */
+  /** CIE — returns document metadata (JSON) */
   @Post('generate-cie')
   async generateCie(
     @Param('installationId') installationId: string,
-    @Query('format') format: string = 'xls',
     @Request() req: any,
-    @Res() res: Response,
   ) {
-    const result = await this.documentsService.generateCie(installationId, req.user.tenantId, req.user.id);
-    if (format === 'pdf') {
-      const pdfFilename = result.xlsDoc.filename.replace('.xls', '.pdf');
-      res.set({ 'Content-Type': 'application/pdf', 'Content-Disposition': `attachment; filename="${pdfFilename}"`, 'Content-Length': String(result.pdfBuffer.length) });
-      return res.send(result.pdfBuffer);
-    }
-    res.set({ 'Content-Type': 'application/vnd.ms-excel', 'Content-Disposition': `attachment; filename="${result.xlsDoc!.filename}"`, 'Content-Length': String(result.xlsBuffer.length) });
-    return res.send(result.xlsBuffer);
+    return this.documentsService.generateCie(installationId, req.user.tenantId, req.user.id);
   }
 
   /** Solicitud BT — ?format=docx|pdf */

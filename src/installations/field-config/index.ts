@@ -9,13 +9,80 @@ export {
   SECTION_LABELS,
 } from './field-config';
 
+export {
+  determineDocumentationType,
+  getDocumentationReason,
+} from './documentation-triage';
+
+export {
+  replaceField,
+  removeFields,
+} from './shared-fields';
+
 import { ExpedienteProfile, FieldDef, DocType, SECTION_LABELS } from './field-config';
 import { VIVIENDA_NUEVA_FIELDS } from './vivienda-nueva';
+import { VIVIENDA_AMPLIACION_FIELDS } from './vivienda-ampliacion';
+import { LOCAL_FIELDS } from './local';
+import { LOCAL_LPC_FIELDS } from './local-lpc';
+import { INDUSTRIAL_FIELDS } from './industrial';
+import { GARAJE_FIELDS } from './garaje';
+import { GARAJE_LPC_FIELDS } from './garaje-lpc';
+import { ENLACE_FIELDS } from './enlace';
+import { TEMPORAL_FIELDS } from './temporal';
+import { IRVE_FIELDS } from './irve';
+import { AUTOCONSUMO_FIELDS } from './autoconsumo';
+import { GENERACION_FIELDS } from './generacion';
+import { MOJADO_FIELDS } from './mojado';
+import { ELEVACION_FIELDS } from './elevacion';
+import { CALDEO_FIELDS } from './caldeo';
+import { ROTULOS_FIELDS } from './rotulos';
+import { LOCAL_ESPECIAL_FIELDS } from './local-especial';
 
 /** Mapa de campos por perfil de expediente */
 const FIELD_MAPS: Partial<Record<ExpedienteProfile, FieldDef[]>> = {
   VIVIENDA_NUEVA: VIVIENDA_NUEVA_FIELDS,
-  // Futuro: LOCAL_NUEVO, INDUSTRIAL, IRVE, AUTOCONSUMO, etc.
+  VIVIENDA_AMPLIACION: VIVIENDA_AMPLIACION_FIELDS,
+  VIVIENDA_MODIFICACION: VIVIENDA_AMPLIACION_FIELDS, // Mismos campos que ampliacion
+  LOCAL_NUEVO: LOCAL_FIELDS,
+  LOCAL_AMPLIACION: LOCAL_FIELDS, // Misma estructura base
+  LOCAL_LPC: LOCAL_LPC_FIELDS,
+  INDUSTRIAL: INDUSTRIAL_FIELDS,
+  GARAJE: GARAJE_FIELDS,
+  GARAJE_LPC: GARAJE_LPC_FIELDS,
+  ENLACE: ENLACE_FIELDS,
+  TEMPORAL: TEMPORAL_FIELDS,
+  IRVE: IRVE_FIELDS,
+  AUTOCONSUMO: AUTOCONSUMO_FIELDS,
+  GENERACION: GENERACION_FIELDS,
+  MOJADO: MOJADO_FIELDS,
+  ELEVACION: ELEVACION_FIELDS,
+  CALDEO: CALDEO_FIELDS,
+  ROTULOS: ROTULOS_FIELDS,
+  LOCAL_ESPECIAL: LOCAL_ESPECIAL_FIELDS,
+};
+
+/** Mapa de installationType (wizard) a ExpedienteProfile */
+const PROFILE_MAP: Record<string, ExpedienteProfile> = {
+  vivienda: 'VIVIENDA_NUEVA',
+  local: 'LOCAL_NUEVO',
+  industrial: 'INDUSTRIAL',
+  garaje: 'GARAJE',
+  enlace: 'ENLACE',
+  temporal: 'TEMPORAL',
+  irve: 'IRVE',
+  autoconsumo: 'AUTOCONSUMO',
+  generacion: 'GENERACION',
+  lpc_host: 'LOCAL_LPC',
+  lpc_espec: 'LOCAL_LPC',
+  lpc_reun: 'LOCAL_LPC',
+  lpc_otros: 'LOCAL_LPC',
+  garaje_lpc: 'GARAJE_LPC',
+  temporal_lpc: 'LOCAL_LPC',
+  mojado: 'MOJADO',
+  elevacion: 'ELEVACION',
+  caldeo: 'CALDEO',
+  rotulos: 'ROTULOS',
+  local_esp: 'LOCAL_ESPECIAL',
 };
 
 /** Determina el perfil de expediente desde los datos de la instalacion */
@@ -26,6 +93,9 @@ export function getExpedienteProfile(installation: {
   const tipo = installation.installationType?.toLowerCase();
   const exp = installation.expedienteType?.toUpperCase();
 
+  if (!tipo) return 'DEFAULT';
+
+  // Vivienda: distinguir nueva / ampliacion / modificacion
   if (tipo === 'vivienda') {
     if (!exp || exp === 'NUEVA') return 'VIVIENDA_NUEVA';
     if (exp.includes('AMPLIACION')) return 'VIVIENDA_AMPLIACION';
@@ -33,16 +103,14 @@ export function getExpedienteProfile(installation: {
     return 'VIVIENDA_NUEVA';
   }
 
+  // Local: distinguir nuevo / ampliacion
   if (tipo === 'local') {
     if (exp?.includes('AMPLIACION')) return 'LOCAL_AMPLIACION';
     return 'LOCAL_NUEVO';
   }
 
-  if (tipo === 'industrial') return 'INDUSTRIAL';
-  if (tipo === 'irve') return 'IRVE';
-  if (tipo === 'autoconsumo') return 'AUTOCONSUMO';
-
-  return 'DEFAULT';
+  // Resto: mapeo directo
+  return PROFILE_MAP[tipo] || 'DEFAULT';
 }
 
 /** Obtiene los campos para un perfil. Fallback a VIVIENDA_NUEVA. */
@@ -87,6 +155,18 @@ export function computeFieldStatus(
   const userFields = fields.filter((f) => f.group === 'A' || f.group === 'B');
   const allNonCalcFields = fields.filter((f) => f.group !== 'C');
 
+  // Pre-compute "atLeastOneOf" groups: check if at least one field in the group has a value
+  const atLeastOneGroups = new Map<string, boolean>();
+  for (const field of fields) {
+    if (!field.atLeastOneOf) continue;
+    if (!atLeastOneGroups.has(field.atLeastOneOf)) {
+      atLeastOneGroups.set(field.atLeastOneOf, false);
+    }
+    if (hasValue(installation[field.name])) {
+      atLeastOneGroups.set(field.atLeastOneOf, true);
+    }
+  }
+
   const totalFields = userFields.length;
   let completedFields = 0;
 
@@ -96,6 +176,25 @@ export function computeFieldStatus(
   >();
 
   for (const field of userFields) {
+    // atLeastOneOf group: if any field in the group has a value, all count as complete
+    if (field.atLeastOneOf) {
+      const groupSatisfied = atLeastOneGroups.get(field.atLeastOneOf) ?? false;
+      if (groupSatisfied) {
+        completedFields++;
+      } else {
+        const section = field.section;
+        if (!missingSectionsMap.has(section)) {
+          missingSectionsMap.set(section, []);
+        }
+        missingSectionsMap.get(section)!.push({
+          name: field.name,
+          label: field.label,
+          requiredForDocs: field.requiredForDocs,
+        });
+      }
+      continue;
+    }
+
     if (hasValue(installation[field.name])) {
       completedFields++;
     } else if (!field.optional) {
@@ -135,7 +234,12 @@ export function computeFieldStatus(
     const docFields = allNonCalcFields.filter(
       (f) => f.requiredForDocs?.includes(docType) && !f.optional,
     );
-    const missing = docFields.filter((f) => !hasValue(installation[f.name]));
+    const missing = docFields.filter((f) => {
+      if (f.atLeastOneOf) {
+        return !(atLeastOneGroups.get(f.atLeastOneOf) ?? false);
+      }
+      return !hasValue(installation[f.name]);
+    });
     documentReadiness[docType] = {
       ready: missing.length === 0,
       missingCount: missing.length,
@@ -173,6 +277,7 @@ export function computeFieldConfig(
       requiredForDocs?: DocType[];
       calculatedBy?: string;
       optional?: boolean;
+      atLeastOneOf?: string;
     }[]
   >();
 
@@ -182,18 +287,23 @@ export function computeFieldConfig(
       sectionsMap.set(section, []);
     }
 
+    // For group B fields, resolve default when DB value is null
+    const dbValue = installation[field.name];
+    const effectiveValue = hasValue(dbValue) ? dbValue : (field.defaultValue ?? null);
+
     sectionsMap.get(section)!.push({
       name: field.name,
       label: field.label,
       group: field.group,
       inputType: field.inputType,
       options: field.options,
-      currentValue: installation[field.name] ?? null,
+      currentValue: effectiveValue,
       defaultValue: field.defaultValue,
-      isComplete: hasValue(installation[field.name]),
+      isComplete: hasValue(effectiveValue),
       requiredForDocs: field.requiredForDocs,
       calculatedBy: field.calculatedBy,
       optional: field.optional,
+      atLeastOneOf: field.atLeastOneOf,
     });
   }
 

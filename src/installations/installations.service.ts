@@ -14,6 +14,8 @@ import {
   getFieldsForProfile,
   computeFieldStatus,
   computeFieldConfig,
+  resolveAutoFrom,
+  hasValue,
   type ExpedienteProfile,
 } from './field-config';
 
@@ -76,6 +78,20 @@ export class InstallationsService {
       else if (exp.startsWith('MODIFICACION')) wizardMapped.tipoActuacion = 'Modificación';
     }
 
+    // installationType → tipoInstalacionCie
+    if (dto.installationType && !dto.tipoInstalacionCie) {
+      const tipoMap: Record<string, string> = {
+        vivienda: 'Vivienda',
+        local: 'Local comercial',
+        industrial: 'Nave industrial',
+        irve: 'IRVE',
+        autoconsumo: 'Autoconsumo',
+      };
+      if (tipoMap[dto.installationType]) {
+        wizardMapped.tipoInstalacionCie = tipoMap[dto.installationType];
+      }
+    }
+
     // installationType → supplyType (where applicable)
     if (dto.installationType && !dto.supplyType) {
       const t = dto.installationType;
@@ -88,6 +104,18 @@ export class InstallationsService {
         wizardMapped.supplyType = 'LOCAL_COMERCIAL';
       } else if (t === 'autoconsumo') {
         wizardMapped.supplyType = 'LOCAL_COMERCIAL';
+      }
+    }
+
+    // vivienda → IGA + potMaxAdmisible defaults
+    if (dto.installationType === 'vivienda' && !dto.igaNominal) {
+      const voltage = dto.supplyVoltage ?? 230;
+      if (dto.gradoElectrificacion === 'ELEVADO') {
+        wizardMapped.igaNominal = 40;
+        wizardMapped.potMaxAdmisible = voltage * 40;
+      } else {
+        wizardMapped.igaNominal = 25;
+        wizardMapped.potMaxAdmisible = voltage * 25;
       }
     }
 
@@ -142,6 +170,21 @@ export class InstallationsService {
     const installation = await this.findOne(id, user);
     const profile = getExpedienteProfile(installation);
     const fields = getFieldsForProfile(profile);
+
+    // Resolve autoFrom values for fields where DB value is null
+    const autoFromFields = fields.filter((f) => f.autoFrom && !hasValue((installation as any)[f.name]));
+    if (autoFromFields.length > 0) {
+      const tenant = await this.prisma.tenant.findUnique({ where: { id: user.tenantId } });
+      const installer = await this.prisma.installer.findFirst({ where: { tenantId: user.tenantId, isDefault: true } });
+      const instData = installation as any;
+      for (const field of autoFromFields) {
+        const resolved = resolveAutoFrom(field.autoFrom!, tenant as any, installer as any);
+        if (resolved != null) {
+          instData[field.name] = resolved;
+        }
+      }
+    }
+
     const sections = computeFieldConfig(installation as any, fields);
 
     return {

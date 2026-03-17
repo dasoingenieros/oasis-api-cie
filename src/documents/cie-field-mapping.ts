@@ -80,7 +80,7 @@ export const TECNICAS_FIELDS: CieFieldMapping[] = [
   { cell: 'I24', col: 'I',  row: 23, field: 'puntoConexion',       type: 'db',       valueType: 'string' },
   { cell: 'M24', col: 'M',  row: 23, field: 'tipoAcometida',       type: 'db',       valueType: 'string' },
   { cell: 'P24', col: 'P',  row: 23, field: 'tipoCgp',             type: 'db',       valueType: 'string' },
-  { cell: 'T24', col: 'T',  row: 23, field: 'inBaseCgp',           type: 'db',       valueType: 'string' },
+  { cell: 'T24', col: 'T',  row: 23, field: 'esquemaCgp',           type: 'db',       valueType: 'string' },
   { cell: 'J25', col: 'J',  row: 24, field: 'igaNominal',          type: 'db',       valueType: 'number' },
   { cell: 'P25', col: 'P',  row: 24, field: 'protSobretensiones',  type: 'computed', valueType: 'string', transform: 'boolToSiNo' },
   { cell: 'U25', col: 'U',  row: 24, field: '_intDiferencial',     type: 'computed', valueType: 'string', transform: 'hasDiferencial' },
@@ -150,6 +150,6 @@ export const OPTIONAL_FIELDS = new Set([
   'emplazBloque', 'emplazEscalera',
   'temporalidad', 'cups', 'aforo',
   'potAmpliacion', 'potOriginal', 'potLuminariasReeae',
-  'tipoCgp', 'inBaseCgp',
+  'tipoCgp', 'esquemaCgp',
   'otrasVerificaciones', 'infoAdicional', 'contadorUbicacion',
 ]);

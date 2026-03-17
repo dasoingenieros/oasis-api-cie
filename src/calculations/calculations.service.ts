@@ -129,7 +129,10 @@ export class CalculationsService {
     // ── Valores del usuario ────────────────────────────────
     const voltage = inst.supplyVoltage ?? 230;
     const phaseSystem: 'single' | 'three' = (voltage === 400 || voltage === 380) ? 'three' : 'single';
-    const userIgaA = panel?.igaCalibreA ?? inst.igaNominal ?? 25;
+    const rawIgaA = panel?.igaCalibreA ?? inst.igaNominal ?? 25;
+    // ITC-BT-10: mínimo 40A para electrificación elevada (P=9200W, I=9200/230=40A)
+    const minIgaA = inst.supplyType === 'VIVIENDA_ELEVADA' ? 40 : 25;
+    const userIgaA = Math.max(rawIgaA, minIgaA);
     // P. Máx. Admisible: 1) datos-form, 2) derivada del IGA (V × calibre)
     const igaDerivedPowerKw = phaseSystem === 'three'
       ? (Math.sqrt(3) * voltage * userIgaA) / 1000
@@ -183,6 +186,7 @@ export class CalculationsService {
       data: {
         cdtDi: cdtResult.voltageDropPct,
         seccionCondProteccion: peMm2,
+        seccionDi: userSeccionDi,
         gradoElectrificacion: electrificationGrade === 'elevated' ? 'ELEVADO' : electrificationGrade === 'basic' ? 'BASICO' : undefined,
       },
     });

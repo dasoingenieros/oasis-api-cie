@@ -82,6 +82,7 @@ export class CreateInstallationDto {
 
   // ═══ CGP ═══════════════════════════════════════════════════════
   @IsString() @IsOptional() tipoCgp?: string;
+  @IsString() @IsOptional() esquemaCgp?: string;
   @IsNumber() @IsOptional() inBaseCgp?: number;
   @IsNumber() @IsOptional() inCartuchoCgp?: number;
 

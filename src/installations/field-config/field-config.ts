@@ -8,9 +8,20 @@ export type ExpedienteProfile =
   | 'VIVIENDA_MODIFICACION'
   | 'LOCAL_NUEVO'
   | 'LOCAL_AMPLIACION'
+  | 'LOCAL_LPC'
   | 'INDUSTRIAL'
+  | 'GARAJE'
+  | 'GARAJE_LPC'
+  | 'ENLACE'
+  | 'TEMPORAL'
   | 'IRVE'
   | 'AUTOCONSUMO'
+  | 'GENERACION'
+  | 'MOJADO'
+  | 'ELEVACION'
+  | 'CALDEO'
+  | 'ROTULOS'
+  | 'LOCAL_ESPECIAL'
   | 'DEFAULT';
 
 /**
@@ -50,6 +61,8 @@ export interface FieldDef {
   options?: string[];
   /** Si el campo es opcional (no bloquea generacion aunque falte) */
   optional?: boolean;
+  /** Grupo "al menos uno obligatorio": si al menos un campo del grupo tiene valor, todos cuentan como completos */
+  atLeastOneOf?: string;
 }
 
 /** Labels de las secciones */
@@ -60,7 +73,6 @@ export const SECTION_LABELS: Record<string, string> = {
   acometida: 'Acometida',
   cgp: 'Caja general de proteccion',
   lga: 'Linea general de alimentacion',
-  di: 'Derivacion individual',
   modulo_medida: 'Modulo de medida',
   protecciones: 'Protecciones',
   tierra: 'Puesta a tierra y verificaciones',
