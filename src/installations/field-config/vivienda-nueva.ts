@@ -280,10 +280,11 @@ export const VIVIENDA_NUEVA_FIELDS: FieldDef[] = [
   // ═══ DATOS TECNICOS ═══
   {
     name: 'tipoDocumentacion',
-    group: 'C',
+    group: 'B',
     section: 'tecnico',
     label: 'Tipo documentacion',
-    calculatedBy: 'auto: MTD para vivienda (<100kW)',
+    defaultValue: 'MTD',
+    inputType: 'text',
     requiredForDocs: ['CIE', 'SOLICITUD_BT'],
   },
   {

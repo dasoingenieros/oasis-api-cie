@@ -99,6 +99,15 @@ export class UsersService implements UserLookupService {
       },
     });
 
+    // Create initial FREE certificate credit
+    await (this.prisma as any).certificateCredit.create({
+      data: {
+        tenantId,
+        userId: created.id,
+        source: 'FREE',
+      },
+    });
+
     // Send verification email (fire and forget)
     this.emailService.sendVerificationEmail(data.name, data.email, emailVerifyToken).catch(() => {});
 

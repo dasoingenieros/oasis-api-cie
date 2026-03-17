@@ -54,10 +54,11 @@ const TIERRA_TEMPORAL: FieldDef[] = [
 const TECNICO_FIELDS: FieldDef[] = [
   {
     name: 'tipoDocumentacion',
-    group: 'C',
+    group: 'B',
     section: 'tecnico',
     label: 'Tipo documentacion',
-    calculatedBy: 'auto: MTD si P <= 50kW (ITC-BT-04 grupo d)',
+    defaultValue: 'MTD',
+    inputType: 'text',
     requiredForDocs: ['CIE', 'SOLICITUD_BT'],
   },
   {

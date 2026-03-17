@@ -14,6 +14,7 @@ export type ExpedienteProfile =
   | 'GARAJE_LPC'
   | 'ENLACE'
   | 'TEMPORAL'
+  | 'TEMPORAL_LPC'
   | 'IRVE'
   | 'AUTOCONSUMO'
   | 'GENERACION'

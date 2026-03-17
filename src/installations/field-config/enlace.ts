@@ -101,10 +101,11 @@ const CGP_ENLACE: FieldDef[] = [
 const TECNICO_FIELDS: FieldDef[] = [
   {
     name: 'tipoDocumentacion',
-    group: 'C',
+    group: 'B',
     section: 'tecnico',
     label: 'Tipo documentacion',
-    calculatedBy: 'auto: MTD salvo P > 100kW (ITC-BT-04 grupo e)',
+    defaultValue: 'MTD',
+    inputType: 'text',
     requiredForDocs: ['CIE', 'SOLICITUD_BT'],
   },
   {

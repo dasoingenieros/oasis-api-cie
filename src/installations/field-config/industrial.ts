@@ -65,10 +65,11 @@ const ACOMETIDA_INDUSTRIAL: FieldDef[] = [
 const TECNICO_FIELDS: FieldDef[] = [
   {
     name: 'tipoDocumentacion',
-    group: 'C',
+    group: 'B',
     section: 'tecnico',
     label: 'Tipo documentacion',
-    calculatedBy: 'auto: MTD si P <= 20kW (ITC-BT-04 grupo a)',
+    defaultValue: 'MTD',
+    inputType: 'text',
     requiredForDocs: ['CIE', 'SOLICITUD_BT'],
   },
   {

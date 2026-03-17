@@ -37,6 +37,7 @@ import { ELEVACION_FIELDS } from './elevacion';
 import { CALDEO_FIELDS } from './caldeo';
 import { ROTULOS_FIELDS } from './rotulos';
 import { LOCAL_ESPECIAL_FIELDS } from './local-especial';
+import { TEMPORAL_LPC_FIELDS } from './temporal-lpc';
 
 /** Mapa de campos por perfil de expediente */
 const FIELD_MAPS: Partial<Record<ExpedienteProfile, FieldDef[]>> = {
@@ -59,6 +60,7 @@ const FIELD_MAPS: Partial<Record<ExpedienteProfile, FieldDef[]>> = {
   CALDEO: CALDEO_FIELDS,
   ROTULOS: ROTULOS_FIELDS,
   LOCAL_ESPECIAL: LOCAL_ESPECIAL_FIELDS,
+  TEMPORAL_LPC: TEMPORAL_LPC_FIELDS,
 };
 
 /** Mapa de installationType (wizard) a ExpedienteProfile */
@@ -77,7 +79,7 @@ const PROFILE_MAP: Record<string, ExpedienteProfile> = {
   lpc_reun: 'LOCAL_LPC',
   lpc_otros: 'LOCAL_LPC',
   garaje_lpc: 'GARAJE_LPC',
-  temporal_lpc: 'LOCAL_LPC',
+  temporal_lpc: 'TEMPORAL_LPC',
   mojado: 'MOJADO',
   elevacion: 'ELEVACION',
   caldeo: 'CALDEO',

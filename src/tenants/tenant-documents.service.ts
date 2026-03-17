@@ -3,6 +3,10 @@ import { PrismaService } from '../prisma/prisma.service';
 import * as fs from 'fs';
 import * as path from 'path';
 
+const DEFAULT_ANEXO_USUARIO_PATH = path.join(
+  __dirname, '..', '..', 'documents', 'templates', 'anexo-usuario-default.pdf',
+);
+
 type TenantDocType = 'certificado-empresa' | 'anexo-usuario';
 
 const DOC_TYPE_FIELDS: Record<TenantDocType, { urlField: string; nameField: string; filename: string }> = {
@@ -83,10 +87,15 @@ export class TenantDocumentsService {
     const filePath = (tenant as any)[config.urlField] as string | null;
     const originalName = (tenant as any)[config.nameField] as string | null;
 
-    if (!filePath || !fs.existsSync(filePath)) {
-      throw new NotFoundException('Documento no encontrado');
+    if (filePath && fs.existsSync(filePath)) {
+      return { filePath, filename: originalName || config.filename };
     }
 
-    return { filePath, filename: originalName || config.filename };
+    // Fallback: serve default template for anexo-usuario
+    if (docType === 'anexo-usuario' && fs.existsSync(DEFAULT_ANEXO_USUARIO_PATH)) {
+      return { filePath: DEFAULT_ANEXO_USUARIO_PATH, filename: 'anexo-informacion-usuario.pdf' };
+    }
+
+    throw new NotFoundException('Documento no encontrado');
   }
 }

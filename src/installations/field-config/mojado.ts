@@ -26,10 +26,11 @@ import {
 const TECNICO_FIELDS: FieldDef[] = [
   {
     name: 'tipoDocumentacion',
-    group: 'C',
+    group: 'B',
     section: 'tecnico',
     label: 'Tipo documentacion',
-    calculatedBy: 'auto: MTD si P <= 10kW (ITC-BT-04 grupo c)',
+    defaultValue: 'MTD',
+    inputType: 'text',
     requiredForDocs: ['CIE', 'SOLICITUD_BT'],
   },
   {

@@ -27,60 +27,6 @@ export class DocumentsService {
     private readonly solicitudGenerator: SolicitudBtGeneratorService,
   ) {}
 
-  // ─── Verificar límite CIE del plan ──────────────────────────
-
-  async checkCieLimit(tenantId: string): Promise<void> {
-    const tenant = await this.prisma.tenant.findUnique({
-      where: { id: tenantId },
-    });
-    if (!tenant) throw new NotFoundException('Tenant no encontrado');
-
-    // Límite total (-1 = ilimitado)
-    if (tenant.maxCertsTotal > 0) {
-      if (tenant.certCount >= tenant.maxCertsTotal) {
-        throw new ForbiddenException({
-          code: 'CIE_LIMIT_REACHED',
-          message: `Has alcanzado el límite de ${tenant.maxCertsTotal} CIE. Mejora tu plan para seguir generando certificados.`,
-          currentCount: tenant.certCount,
-          maxAllowed: tenant.maxCertsTotal,
-        });
-      }
-      return;
-    }
-
-    // Límite mensual (-1 = ilimitado)
-    if (tenant.maxCertsMonth === -1) return;
-
-    // Reset mensual si toca
-    const now = new Date();
-    if (now > tenant.certResetDate) {
-      const nextReset = new Date(now.getFullYear(), now.getMonth() + 1, 1);
-      await this.prisma.tenant.update({
-        where: { id: tenantId },
-        data: { certCount: 0, certResetDate: nextReset },
-      });
-      return;
-    }
-
-    if (tenant.certCount >= tenant.maxCertsMonth) {
-      throw new ForbiddenException({
-        code: 'CIE_LIMIT_REACHED',
-        message: `Has alcanzado el límite de ${tenant.maxCertsMonth} CIE este mes.`,
-        currentCount: tenant.certCount,
-        maxAllowed: tenant.maxCertsMonth,
-      });
-    }
-  }
-
-  // ─── Incrementar contador CIE ───────────────────────────────
-
-  private async incrementCertCount(tenantId: string): Promise<void> {
-    await this.prisma.tenant.update({
-      where: { id: tenantId },
-      data: { certCount: { increment: 1 } },
-    });
-  }
-
   // ─── Listar documentos ─────────────────────────────────────
 
   async findAll(installationId: string, tenantId: string) {
@@ -177,9 +123,13 @@ export class DocumentsService {
   // ─── Generar MTD u otros ───────────────────────────────────
 
   async generate(installationId: string, tenantId: string, type: string, userId?: string) {
-    // Check both user-level and tenant-level limits
-    if (userId) await this.subscriptionsService.checkCanGenerate(userId);
-    await this.checkCieLimit(tenantId);
+    // Check credit-based limits
+    if (userId) {
+      const check = await this.subscriptionsService.canGenerateDocument(userId);
+      if (!check.allowed) {
+        throw new ForbiddenException({ message: check.reason, code: 'CERT_LIMIT_REACHED' });
+      }
+    }
 
     const installation = await this.verifyInstallation(installationId, tenantId, true);
     const panelVersion = (installation as any).panelVersion ?? 'v1';
@@ -233,9 +183,8 @@ export class DocumentsService {
       },
     });
 
-    // Increment user + tenant cert counters
-    if (userId) await this.subscriptionsService.incrementCertsGenerated(userId);
-    await this.incrementCertCount(tenantId);
+    // Consume credit (or just increment counter for Pro/Enterprise)
+    if (userId) await this.subscriptionsService.consumeCredit(userId, installationId);
 
     this.logger.log(`Documento ${type} generado: ${filename} (${buffer.length} bytes, v${existingCount + 1})`);
 
@@ -250,9 +199,13 @@ export class DocumentsService {
   // ─── Generar CIE (.xls + .pdf) ────────────────────────────
 
   async generateCie(installationId: string, tenantId: string, userId?: string) {
-    // Check both user-level and tenant-level limits
-    if (userId) await this.subscriptionsService.checkCanGenerate(userId);
-    await this.checkCieLimit(tenantId);
+    // Check credit-based limits
+    if (userId) {
+      const check = await this.subscriptionsService.canGenerateDocument(userId);
+      if (!check.allowed) {
+        throw new ForbiddenException({ message: check.reason, code: 'CERT_LIMIT_REACHED' });
+      }
+    }
 
     await this.verifyInstallation(installationId, tenantId);
     const result = await this.cieGenerator.generate(installationId);
@@ -277,9 +230,8 @@ export class DocumentsService {
       data: { identificadorCie: result.cieIdentificador, status: 'DOCUMENTED' },
     });
 
-    // Increment user + tenant cert counters
-    if (userId) await this.subscriptionsService.incrementCertsGenerated(userId);
-    await this.incrementCertCount(tenantId);
+    // Consume credit (or just increment counter for Pro/Enterprise)
+    if (userId) await this.subscriptionsService.consumeCredit(userId, installationId);
 
     this.logger.log(`CIE generado: ${result.cieIdentificador}`);
 
@@ -295,9 +247,13 @@ export class DocumentsService {
   // ─── Generar Solicitud BT (.docx + .pdf) ──────────────────
 
   async generateSolicitud(installationId: string, tenantId: string, userId?: string) {
-    // Check both user-level and tenant-level limits
-    if (userId) await this.subscriptionsService.checkCanGenerate(userId);
-    await this.checkCieLimit(tenantId);
+    // Check credit-based limits
+    if (userId) {
+      const check = await this.subscriptionsService.canGenerateDocument(userId);
+      if (!check.allowed) {
+        throw new ForbiddenException({ message: check.reason, code: 'CERT_LIMIT_REACHED' });
+      }
+    }
 
     await this.verifyInstallation(installationId, tenantId);
     const result = await this.solicitudGenerator.generate(installationId);
@@ -317,9 +273,8 @@ export class DocumentsService {
       },
     });
 
-    // Increment user + tenant cert counters
-    if (userId) await this.subscriptionsService.incrementCertsGenerated(userId);
-    await this.incrementCertCount(tenantId);
+    // Consume credit (or just increment counter for Pro/Enterprise)
+    if (userId) await this.subscriptionsService.consumeCredit(userId, installationId);
 
     this.logger.log(`Solicitud BT generada: docx=${result.docxBuffer.length}B`);
 
@@ -346,6 +301,15 @@ export class DocumentsService {
     const doc = await this.prisma.document.findFirst({ where: { id: documentId, installationId } });
     if (!doc) throw new NotFoundException('Documento no encontrado');
     await this.prisma.document.delete({ where: { id: documentId } });
+
+    // When deleting a CIE, clear the identificadorCie on the installation
+    if (doc.type === 'CERTIFICADO') {
+      await this.prisma.installation.update({
+        where: { id: installationId },
+        data: { identificadorCie: null },
+      });
+    }
+
     return { deleted: true };
   }
 

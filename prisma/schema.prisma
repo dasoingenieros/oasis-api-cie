@@ -89,7 +89,7 @@ model User {
   // Plan / límites
   plan            String  @default("FREE")   // FREE, PRO, EMPRESA
   certsGenerated  Int     @default(0)
-  maxCerts        Int     @default(2)        // FREE=2, PRO/EMPRESA=-1 (ilimitado)
+  maxCerts        Int     @default(0)        // Free se gestiona por créditos, PRO/EMPRESA=-1 (ilimitado)
 
   // Datos firmante
   signerRegNum     String?
@@ -120,11 +120,12 @@ model User {
   updatedAt DateTime  @updatedAt
   deletedAt DateTime?
 
-  tenant        Tenant         @relation(fields: [tenantId], references: [id])
-  installations Installation[]
-  documents     Document[]
-  auditLogs     AuditLog[]
-  consentLogs   ConsentLog[]
+  tenant             Tenant              @relation(fields: [tenantId], references: [id])
+  installations      Installation[]
+  documents          Document[]
+  auditLogs          AuditLog[]
+  consentLogs        ConsentLog[]
+  certificateCredits CertificateCredit[]
 
   @@unique([tenantId, email])
   @@index([tenantId])
@@ -904,4 +905,24 @@ model PanelNode {
   @@index([installationId])
   @@index([parentId])
   @@index([installationId, parentId, position])
+}
+
+// ── Créditos de Certificados ────────────────────────────────────────────────
+
+model CertificateCredit {
+  id              String    @id @default(cuid())
+  tenantId        String
+  userId          String
+  source          String    // FREE, PUNTUAL, SUBSCRIPTION
+  stripePaymentId String?
+  used            Boolean   @default(false)
+  usedAt          DateTime?
+  installationId  String?
+  createdAt       DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([tenantId])
+  @@index([used])
 }

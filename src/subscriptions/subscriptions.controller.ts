@@ -33,6 +33,13 @@ export class SubscriptionsController {
     );
   }
 
+  /** Créditos Puntual disponibles */
+  @Get('credits')
+  @UseGuards(JwtAuthGuard)
+  getCredits(@Request() req: any) {
+    return this.subscriptionsService.getAvailableCredits(req.user.id);
+  }
+
   /** Crear sesión del portal de facturación Stripe */
   @Post('portal')
   @UseGuards(JwtAuthGuard)

@@ -1,7 +1,7 @@
-// src/installations/field-config/garaje.ts
-// Perfil GARAJE — garaje NO LPC (<=5 plazas, ventilacion natural).
-// gradoElectrificacion: D. supplyVoltage default 230.
-// Nota: plazasGaraje y ventilacionGaraje no existen en schema.prisma — se omiten.
+// src/installations/field-config/temporal-lpc.ts
+// Perfil TEMPORAL_LPC — instalacion temporal de publica concurrencia.
+// tipoDocumentacion: SIEMPRE PROYECTO (ITC-BT-04 grupo i).
+// temporalidad: A (obligatorio, num dias).
 
 import { FieldDef } from './field-config';
 import {
@@ -10,6 +10,7 @@ import {
   EMPLAZAMIENTO_EXTRAS_FIELDS,
   ACOMETIDA_FIELDS,
   CGP_FIELDS,
+  LGA_FIELDS,
   MODULO_MEDIDA_FIELDS,
   PROTECCIONES_FIELDS,
   TIERRA_FIELDS,
@@ -17,7 +18,7 @@ import {
   INSTALADOR_FIELDS,
   DISTRIBUIDORA_FIELD,
   PRESUPUESTO_FIELDS,
-  CERTIFICACION_FIELDS,
+  CERTIFICACION_LPC_FIELDS,
   FIRMA_FIELDS,
   INFO_FIELDS,
 } from './shared-fields';
@@ -28,9 +29,19 @@ const TECNICO_FIELDS: FieldDef[] = [
     group: 'B',
     section: 'tecnico',
     label: 'Tipo documentacion',
-    defaultValue: 'MTD',
+    defaultValue: 'PROYECTO',
     inputType: 'text',
     requiredForDocs: ['CIE', 'SOLICITUD_BT'],
+  },
+  {
+    name: 'supplyType',
+    group: 'B',
+    section: 'tecnico',
+    label: 'Tipo suministro',
+    defaultValue: 'LOCAL_COMERCIAL',
+    inputType: 'select',
+    options: ['LOCAL_COMERCIAL', 'VIVIENDA_BASICA', 'VIVIENDA_ELEVADA'],
+    requiredForDocs: ['MTD'],
   },
   {
     name: 'supplyVoltage',
@@ -49,7 +60,7 @@ const TECNICO_FIELDS: FieldDef[] = [
     label: 'Tipo actuacion',
     defaultValue: 'Nueva',
     inputType: 'select',
-    options: ['Nueva', 'Ampliacion con o sin modif.', 'Modificacion'],
+    options: ['Nueva'],
     requiredForDocs: ['MTD', 'CIE', 'SOLICITUD_BT'],
   },
   {
@@ -57,7 +68,7 @@ const TECNICO_FIELDS: FieldDef[] = [
     group: 'B',
     section: 'tecnico',
     label: 'Uso instalacion',
-    defaultValue: 'Garaje',
+    defaultValue: 'Instalacion temporal LPC',
     inputType: 'text',
     requiredForDocs: ['MTD', 'SOLICITUD_BT'],
   },
@@ -66,29 +77,45 @@ const TECNICO_FIELDS: FieldDef[] = [
     group: 'B',
     section: 'tecnico',
     label: 'Tipo instalacion CIE',
-    defaultValue: 'Garaje',
+    defaultValue: 'Instalacion temporal',
     inputType: 'select',
     options: [
-      'Garaje',
+      'Instalacion temporal',
+      'Local de publica concurrencia',
       'Local comercial',
       'Oficina',
       'Vivienda',
       'Nave industrial',
+      'Garaje',
       'Alumbrado exterior',
       'IRVE',
       'Autoconsumo',
       'Piscina',
-      'Local de publica concurrencia',
-      'Instalacion temporal',
     ],
     requiredForDocs: ['MTD', 'CIE', 'SOLICITUD_BT'],
+  },
+  {
+    name: 'aforo',
+    group: 'A',
+    section: 'tecnico',
+    label: 'Aforo',
+    inputType: 'text',
+    requiredForDocs: ['CIE'],
+  },
+  {
+    name: 'temporalidad',
+    group: 'A',
+    section: 'tecnico',
+    label: 'Duracion (dias)',
+    inputType: 'number',
+    requiredForDocs: ['MTD', 'CIE'],
   },
   {
     name: 'installationType',
     group: 'B',
     section: 'tecnico',
     label: 'Tipo instalacion (wizard)',
-    defaultValue: 'garaje',
+    defaultValue: 'temporal_lpc',
     inputType: 'text',
   },
   {
@@ -117,13 +144,13 @@ const TECNICO_FIELDS: FieldDef[] = [
     options: ['TT', 'TN-S', 'TN-C', 'TN-C-S', 'IT'],
     requiredForDocs: ['MTD', 'CIE'],
   },
-  // gradoElectrificacion: grupo D (no aplica para garaje)
+  // gradoElectrificacion: grupo D (no aplica para LPC)
   {
     name: 'seccionDi',
     group: 'B',
     section: 'tecnico',
     label: 'Seccion DI (mm2)',
-    defaultValue: 6,
+    defaultValue: 10,
     inputType: 'number',
     requiredForDocs: ['MTD', 'CIE'],
   },
@@ -137,7 +164,7 @@ const TECNICO_FIELDS: FieldDef[] = [
   },
 ];
 
-export const GARAJE_FIELDS: FieldDef[] = [
+export const TEMPORAL_LPC_FIELDS: FieldDef[] = [
   ...TITULAR_FIELDS,
   ...EMPLAZAMIENTO_DIRECCION_FIELDS,
   ...EMPLAZAMIENTO_EXTRAS_FIELDS,
@@ -145,14 +172,14 @@ export const GARAJE_FIELDS: FieldDef[] = [
   ...DISTRIBUIDORA_FIELD,
   ...ACOMETIDA_FIELDS,
   ...CGP_FIELDS,
-  // LGA: no aplica para garaje individual (grupo D)
+  ...LGA_FIELDS,
   ...MODULO_MEDIDA_FIELDS,
   ...PROTECCIONES_FIELDS,
   ...TIERRA_FIELDS,
   ...EMPRESA_FIELDS,
   ...INSTALADOR_FIELDS,
   ...PRESUPUESTO_FIELDS,
-  ...CERTIFICACION_FIELDS,
+  ...CERTIFICACION_LPC_FIELDS,
   ...FIRMA_FIELDS,
   ...INFO_FIELDS,
 ];
