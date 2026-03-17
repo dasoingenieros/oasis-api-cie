@@ -159,7 +159,7 @@ export class SubscriptionsService {
     else if (enterprisePrices.includes(priceId)) plan = 'ENTERPRISE';
     else if (isPuntual) plan = 'PUNTUAL';
 
-    const successUrl = this.configService.get('STRIPE_SUCCESS_URL') || 'https://cie.oasisplatform.es/dashboard?session_id={CHECKOUT_SESSION_ID}';
+    const successUrl = this.configService.get('STRIPE_SUCCESS_URL') || 'https://cie.oasisplatform.es/?session_id={CHECKOUT_SESSION_ID}';
     const cancelUrl = this.configService.get('STRIPE_CANCEL_URL') || 'https://cie.oasisplatform.es/pricing';
 
     if (isPuntual) {
@@ -203,7 +203,7 @@ export class SubscriptionsService {
 
     const session = await this.stripe.billingPortal.sessions.create({
       customer: tenant.stripeCustomerId,
-      return_url: 'https://cie.oasisplatform.es/dashboard',
+      return_url: 'https://cie.oasisplatform.es/',
     });
 
     return { url: session.url };
