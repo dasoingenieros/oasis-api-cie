@@ -17,6 +17,8 @@ export interface UsageResponse {
   isLimited: boolean;
   remaining: number;
   availableCredits: number;
+  cancelAtPeriodEnd: boolean;
+  cancelAt: string | null;
 }
 
 @Injectable()
@@ -50,16 +52,41 @@ export class SubscriptionsService {
     const remaining = isLimited ? Math.max(0, maxCerts - certsGenerated) : -1;
     const availableCredits = await this.getAvailableCredits(userId);
 
-    return { plan, certsGenerated, maxCerts, isLimited, remaining, availableCredits };
+    // Cancellation info from tenant
+    const tenant = await this.prisma.tenant.findUnique({ where: { id: user.tenantId } });
+    const cancelAtPeriodEnd = (tenant as any)?.cancelAtPeriodEnd ?? false;
+    const currentPeriodEnd = (tenant as any)?.currentPeriodEnd;
+    const cancelAt = cancelAtPeriodEnd && currentPeriodEnd
+      ? (currentPeriodEnd as Date).toISOString()
+      : null;
+
+    return { plan, certsGenerated, maxCerts, isLimited, remaining, availableCredits, cancelAtPeriodEnd, cancelAt };
   }
 
-  async canGenerateDocument(userId: string): Promise<{ allowed: boolean; reason?: string }> {
+  async canGenerateDocument(userId: string, installationId?: string): Promise<{ allowed: boolean; reason?: string }> {
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
     if (!user) return { allowed: false, reason: 'Usuario no encontrado' };
 
     // Pro/Enterprise: siempre pueden
     if ((user as any).maxCerts === -1) {
       return { allowed: true };
+    }
+
+    // Verificar si ya tiene crédito usado para esta instalación
+    if (installationId) {
+      const existingCredit = await (this.prisma as any).certificateCredit.findFirst({
+        where: { userId, installationId, used: true },
+      });
+      if (existingCredit) {
+        // Verificar que el NIF del titular no cambió
+        if (existingCredit.lockedNif) {
+          const installation = await this.prisma.installation.findUnique({ where: { id: installationId } });
+          if (installation?.titularNif !== existingCredit.lockedNif) {
+            return { allowed: false, reason: 'El NIF del titular ha cambiado. Se requiere un nuevo crédito.' };
+          }
+        }
+        return { allowed: true };
+      }
     }
 
     // Free/Puntual: comprobar si tiene créditos sin usar
@@ -93,9 +120,10 @@ export class SubscriptionsService {
     });
 
     if (credit) {
+      const installation = await this.prisma.installation.findUnique({ where: { id: installationId } });
       await (this.prisma as any).certificateCredit.update({
         where: { id: credit.id },
-        data: { used: true, usedAt: new Date(), installationId },
+        data: { used: true, usedAt: new Date(), installationId, lockedNif: installation?.titularNif || null },
       });
     }
 
@@ -168,6 +196,7 @@ export class SubscriptionsService {
         mode: 'payment',
         customer: customerId,
         line_items: [{ price: priceId, quantity: 1 }],
+        automatic_tax: { enabled: true },
         payment_intent_data: {
           metadata: { userId, tenantId, plan: 'PUNTUAL', credits: '1' },
         },
@@ -182,6 +211,7 @@ export class SubscriptionsService {
         mode: 'subscription',
         customer: customerId,
         line_items: [{ price: priceId, quantity: 1 }],
+        automatic_tax: { enabled: true },
         subscription_data: {
           metadata: { userId, tenantId, plan, phase: 'launch', grandfathered: 'true' },
         },
@@ -280,6 +310,8 @@ export class SubscriptionsService {
           stripeCustomerId: session.customer as string,
           stripeSubscriptionId: subscriptionId,
           subscriptionStatus: 'active',
+          cancelAtPeriodEnd: false,
+          currentPeriodEnd: null,
         },
       });
 
@@ -323,7 +355,13 @@ export class SubscriptionsService {
 
     await this.prisma.tenant.update({
       where: { id: tenant.id },
-      data: { subscriptionStatus: status },
+      data: {
+        subscriptionStatus: status,
+        cancelAtPeriodEnd: subscription.cancel_at_period_end ?? false,
+        currentPeriodEnd: (subscription as any).current_period_end
+          ? new Date((subscription as any).current_period_end * 1000)
+          : null,
+      },
     });
 
     if (adminUser) {
@@ -354,6 +392,8 @@ export class SubscriptionsService {
       data: {
         subscriptionStatus: 'canceled',
         stripeSubscriptionId: null,
+        cancelAtPeriodEnd: false,
+        currentPeriodEnd: null,
       },
     });
 

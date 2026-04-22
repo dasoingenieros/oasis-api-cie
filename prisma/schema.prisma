@@ -37,9 +37,11 @@ model Tenant {
   distribuidoraHab   String?   // Distribuidora habitual
 
   // Stripe
-  stripeCustomerId     String? @unique
+  stripeCustomerId     String?   @unique
   stripeSubscriptionId String?
-  subscriptionStatus   String? // active, past_due, canceled, trialing
+  subscriptionStatus   String?   // active, past_due, canceled, trialing
+  cancelAtPeriodEnd    Boolean   @default(false)
+  currentPeriodEnd     DateTime?
 
   // Límites
   certCount     Int      @default(0)
@@ -918,6 +920,7 @@ model CertificateCredit {
   used            Boolean   @default(false)
   usedAt          DateTime?
   installationId  String?
+  lockedNif       String?
   createdAt       DateTime  @default(now())
 
   user User @relation(fields: [userId], references: [id])

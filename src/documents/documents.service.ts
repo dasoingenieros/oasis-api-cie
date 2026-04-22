@@ -125,7 +125,7 @@ export class DocumentsService {
   async generate(installationId: string, tenantId: string, type: string, userId?: string) {
     // Check credit-based limits
     if (userId) {
-      const check = await this.subscriptionsService.canGenerateDocument(userId);
+      const check = await this.subscriptionsService.canGenerateDocument(userId, installationId);
       if (!check.allowed) {
         throw new ForbiddenException({ message: check.reason, code: 'CERT_LIMIT_REACHED' });
       }
@@ -201,7 +201,7 @@ export class DocumentsService {
   async generateCie(installationId: string, tenantId: string, userId?: string) {
     // Check credit-based limits
     if (userId) {
-      const check = await this.subscriptionsService.canGenerateDocument(userId);
+      const check = await this.subscriptionsService.canGenerateDocument(userId, installationId);
       if (!check.allowed) {
         throw new ForbiddenException({ message: check.reason, code: 'CERT_LIMIT_REACHED' });
       }
@@ -249,7 +249,7 @@ export class DocumentsService {
   async generateSolicitud(installationId: string, tenantId: string, userId?: string) {
     // Check credit-based limits
     if (userId) {
-      const check = await this.subscriptionsService.canGenerateDocument(userId);
+      const check = await this.subscriptionsService.canGenerateDocument(userId, installationId);
       if (!check.allowed) {
         throw new ForbiddenException({ message: check.reason, code: 'CERT_LIMIT_REACHED' });
       }
